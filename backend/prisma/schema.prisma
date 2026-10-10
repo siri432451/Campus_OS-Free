@@ -1,0 +1,547 @@
+// CampusOS Prisma Schema — post Round 5
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ─────────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  LECTURER
+  STUDENT
+  PRINT_OPERATOR
+  REGISTRAR
+}
+
+enum Level {
+  ND1
+  ND2
+  ND3
+  HND1
+  HND2
+}
+
+enum Grade {
+  A
+  B
+  C
+  D
+  E
+  F
+}
+
+enum PrintJobStatus {
+  QUEUED
+  PRINTING
+  DONE
+  CANCELLED
+}
+
+enum AnnouncementTarget {
+  ALL
+  STUDENTS
+  LECTURERS
+  ADMINS
+  ND1
+  ND2
+  ND3
+  HND1
+  HND2
+}
+
+enum SimulationMode {
+  SINGLE
+  CHALLENGE
+}
+
+enum SimulationStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum FlashcardDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum LibraryItemType {
+  PDF
+  VIDEO
+}
+
+enum LibraryCategory {
+  ANATOMY_PHYSIOLOGY
+  MICROBIOLOGY
+  PHARMACOLOGY
+  MATERNAL_NEWBORN_HEALTH
+  MIDWIFERY_PRACTICE
+  COMMUNITY_HEALTH
+  NUTRITION
+  INFECTION_PREVENTION_CONTROL
+  NURSING_ETHICS_PROFESSIONALISM
+  RESEARCH_STATISTICS
+  CLINICAL_SKILLS
+  FIRST_AID_EMERGENCY
+  PUBLIC_HEALTH_EPIDEMIOLOGY
+  REPRODUCTIVE_FAMILY_PLANNING
+  LECTURE_NOTES
+  PAST_QUESTIONS
+  OTHER
+}
+
+// Round 5: AI tutor modes
+enum TutorMode {
+  ANATOMY_PHYSIOLOGY
+  PHARMACOLOGY
+  CLINICAL_REASONING
+  MATERNAL_NEWBORN
+  MICROBIOLOGY_IPC
+  COMMUNITY_HEALTH
+  MIDWIFERY
+  GENERAL_NURSING
+  MEDICAL_SURGICAL
+  FOUNDATION_NURSING
+  MENTAL_HEALTH
+  ETHICS_JURISPRUDENCE
+  NUTRITION_DIETETICS
+}
+
+// Round 5: chat message roles
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+// ── Users ─────────────────────────────────────────────────────
+
+model User {
+  id          String    @id @default(cuid())
+  name        String
+  email       String?   @unique
+  matricNo    String?   @unique @map("matric_no")
+  staffId     String?   @unique @map("staff_id")
+  password    String
+  role        Role      @default(STUDENT)
+  department  String?
+  level       Level?
+
+  // Onboarding state
+  emailVerifiedAt        DateTime? @map("email_verified_at")
+  passwordChangedAt      DateTime? @map("password_changed_at")
+  verificationCode       String?   @map("verification_code")
+  verificationCodeExpiresAt DateTime? @map("verification_code_expires_at")
+  verificationAttempts   Int       @default(0) @map("verification_attempts")
+  verificationLastSentAt DateTime? @map("verification_last_sent_at")
+
+  // Password reset (separate from email verification)
+  passwordResetCode       String?   @map("password_reset_code")
+  passwordResetExpiresAt  DateTime? @map("password_reset_expires_at")
+  passwordResetSentAt     DateTime? @map("password_reset_sent_at")
+
+  // Biodata (filled by student in onboarding, editable by admin)
+  middleName            String?   @map("middle_name")
+  dateOfBirth           DateTime? @map("date_of_birth")
+  gender                String?
+  maritalStatus         String?   @map("marital_status")
+  hometown              String?
+  localGovernment       String?   @map("local_government")
+  stateOfOrigin         String?   @map("state_of_origin")
+  nationality           String?
+  contactAddress        String?   @map("contact_address")
+  residentialAddress    String?   @map("residential_address")
+  bloodGroup            String?   @map("blood_group")
+  genotype              String?
+  biodataCompletedAt    DateTime? @map("biodata_completed_at")
+  phone       String?
+  photoUrl    String?   @map("photo_url")
+  qrCode      String?   @unique @map("qr_code")
+  isActive    Boolean   @default(true) @map("is_active")
+  isHod       Boolean   @default(false) @map("is_hod")
+  lastLogin   DateTime? @map("last_login")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  printCredit        PrintCredit?
+  printJobs          PrintJob[]
+  uploadedBooks      Book[]              @relation("BookUploader")
+  results            Result[]            @relation("StudentResults")
+  resultEntries      Result[]            @relation("LecturerResults")
+  attendanceSessions AttendanceSession[] @relation("LecturerSessions")
+  attendanceRecords  AttendanceRecord[]
+  announcements      Announcement[]
+  wifiSessions       WifiSession[]
+  simulationSessions SimulationSession[]
+  flashcardProgress  FlashcardProgress[]
+  aiMessages         AiMessage[]
+  printCreditTopups  PrintCreditTopup[]
+  operatedPrintJobs  PrintJob[]          @relation("PrintOperator")
+  // Round 5
+  conversations      Conversation[]
+  deckReviews        FlashcardReview[]
+  createdDecks       FlashcardDeckV2[]
+  studySnaps         StudySnap[]
+
+  admissionDate DateTime? @map("admission_date")
+
+  @@map("users")
+}
+
+// ── Books / E-Library ─────────────────────────────────────────
+
+model Book {
+  id              String           @id @default(cuid())
+  title           String
+  author          String?
+  description     String?
+  department      String?
+  level           Level?
+  category        LibraryCategory? @default(OTHER)
+  filePath        String           @map("file_path")
+  fileSize        BigInt?          @map("file_size")
+  type            LibraryItemType  @default(PDF)
+  mimeType        String           @default("application/pdf") @map("mime_type")
+  durationSeconds Int?             @map("duration_seconds")
+  pageCount       Int?             @map("page_count")
+  thumbnailPath   String?          @map("thumbnail_path")
+  coverUrl        String?          @map("cover_url")
+  downloadCount   Int              @default(0) @map("download_count")
+  isFeatured      Boolean          @default(false) @map("is_featured")
+  uploadedById    String           @map("uploaded_by_id")
+  uploadedBy      User             @relation("BookUploader", fields: [uploadedById], references: [id])
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  @@map("books")
+}
+
+// ── Results ───────────────────────────────────────────────────
+
+model Result {
+  id           String   @id @default(cuid())
+  studentId    String   @map("student_id")
+  student      User     @relation("StudentResults", fields: [studentId], references: [id])
+  lecturerId   String?  @map("lecturer_id")
+  lecturer     User?    @relation("LecturerResults", fields: [lecturerId], references: [id])
+  courseCode   String   @map("course_code")
+  courseName   String   @map("course_name")
+  semester     String
+  academicYear String   @map("academic_year")
+  score        Decimal  @db.Decimal(5, 2)
+  grade        Grade
+  creditUnit   Int      @default(2) @map("credit_unit")
+  gradePoint   Decimal  @db.Decimal(3, 1) @map("grade_point")
+  isPublished     Boolean   @default(false) @map("is_published")
+  approvedAt      DateTime? @map("approved_at")
+  approvedById    String?   @map("approved_by")
+  rejectedAt      DateTime? @map("rejected_at")
+  rejectedById    String?   @map("rejected_by")
+  rejectionReason String?   @map("rejection_reason")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([studentId, courseCode, semester, academicYear])
+  @@map("results")
+}
+
+// ── Attendance ────────────────────────────────────────────────
+
+model AttendanceSession {
+  id          String    @id @default(cuid())
+  lecturerId  String    @map("lecturer_id")
+  lecturer    User      @relation("LecturerSessions", fields: [lecturerId], references: [id])
+  courseCode  String    @map("course_code")
+  courseName  String    @map("course_name")
+  sessionCode String    @unique @map("session_code")
+  level       Level?
+  department  String?
+  isActive    Boolean   @default(true) @map("is_active")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  records     AttendanceRecord[]
+
+  @@map("attendance_sessions")
+}
+
+model AttendanceRecord {
+  id        String            @id @default(cuid())
+  sessionId String            @map("session_id")
+  session   AttendanceSession @relation(fields: [sessionId], references: [id])
+  studentId String            @map("student_id")
+  student   User              @relation(fields: [studentId], references: [id])
+  scannedAt DateTime          @default(now()) @map("scanned_at")
+
+  @@unique([sessionId, studentId])
+  @@map("attendance_records")
+}
+
+// ── Print Management ──────────────────────────────────────────
+
+model PrintCredit {
+  id        String   @id @default(cuid())
+  studentId String   @unique @map("student_id")
+  student   User     @relation(fields: [studentId], references: [id])
+  balance   Int      @default(0)
+  accountNo String?  @unique @map("account_no")
+  bankName  String?  @default("Wema Bank") @map("bank_name")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("print_credits")
+}
+
+model PrintCreditTopup {
+  id        String   @id @default(cuid())
+  studentId String   @map("student_id")
+  student   User     @relation(fields: [studentId], references: [id])
+  amount    Int
+  reference String   @unique
+  status    String   @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("print_credit_topups")
+}
+
+model PrintJob {
+  id          String         @id @default(cuid())
+  studentId   String         @map("student_id")
+  student     User           @relation(fields: [studentId], references: [id])
+  operatorId  String?        @map("operator_id")
+  operator    User?          @relation("PrintOperator", fields: [operatorId], references: [id])
+  filePath    String         @map("file_path")
+  fileName    String         @map("file_name")
+  pages       Int
+  copies      Int            @default(1)
+  isColor     Boolean        @default(false) @map("is_color")
+  creditCost  Int            @map("credit_cost")
+  serialNo    Int            @default(autoincrement()) @map("serial_no")
+  status      PrintJobStatus @default(QUEUED)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  completedAt DateTime?      @map("completed_at")
+
+  @@map("print_jobs")
+}
+
+// ── Announcements ─────────────────────────────────────────────
+
+model Announcement {
+  id          String             @id @default(cuid())
+  title       String
+  body        String             @db.Text
+  target      AnnouncementTarget @default(ALL)
+  isPinned    Boolean            @default(false) @map("is_pinned")
+  createdById String             @map("created_by_id")
+  createdBy   User               @relation(fields: [createdById], references: [id])
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  @@map("announcements")
+}
+
+// ── Wi-Fi Sessions ────────────────────────────────────────────
+
+model WifiSession {
+  id         String    @id @default(cuid())
+  studentId  String    @map("student_id")
+  student    User      @relation(fields: [studentId], references: [id])
+  macAddress String?   @map("mac_address")
+  ipAddress  String?   @map("ip_address")
+  grantedAt  DateTime  @default(now()) @map("granted_at")
+  expiresAt  DateTime? @map("expires_at")
+  isActive   Boolean   @default(true) @map("is_active")
+
+  @@map("wifi_sessions")
+}
+
+// ── Clinical Simulation ───────────────────────────────────────
+
+model SimulationCase {
+  id              String   @id @default(cuid())
+  title           String
+  specialty       String
+  difficulty      String   @default("medium")
+  patientName     String   @map("patient_name")
+  patientAge      Int      @map("patient_age")
+  scenario        String   @db.Text
+  vitals          Json
+  expectedActions Json     @map("expected_actions")
+  xpReward        Int      @default(100) @map("xp_reward")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  sessions        SimulationSession[]
+
+  @@map("simulation_cases")
+}
+
+model SimulationSession {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id])
+  caseId    String           @map("case_id")
+  case      SimulationCase   @relation(fields: [caseId], references: [id])
+  mode      SimulationMode   @default(SINGLE)
+  status    SimulationStatus @default(IN_PROGRESS)
+  score     Int              @default(0)
+  xpEarned  Int              @default(0) @map("xp_earned")
+  messages  Json             @default("[]")
+  startedAt DateTime         @default(now()) @map("started_at")
+  endedAt   DateTime?        @map("ended_at")
+
+  @@map("simulation_sessions")
+}
+
+// ── Legacy Flashcards (keep for backwards compat) ─────────────
+
+model FlashcardDeck {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  category    String
+  level       Level?
+  icon        String    @default("📚")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  cards       Flashcard[]
+
+  @@map("flashcard_decks")
+}
+
+model Flashcard {
+  id         String              @id @default(cuid())
+  deckId     String              @map("deck_id")
+  deck       FlashcardDeck       @relation(fields: [deckId], references: [id])
+  front      String
+  back       String              @db.Text
+  difficulty FlashcardDifficulty @default(MEDIUM)
+  order      Int                 @default(0)
+  createdAt  DateTime            @default(now()) @map("created_at")
+  progress   FlashcardProgress[]
+
+  @@map("flashcards")
+}
+
+model FlashcardProgress {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id])
+  cardId      String    @map("card_id")
+  card        Flashcard @relation(fields: [cardId], references: [id])
+  reviewCount Int       @default(0) @map("review_count")
+  lastReview  DateTime? @map("last_review")
+  mastered    Boolean   @default(false)
+
+  @@unique([userId, cardId])
+  @@map("flashcard_progress")
+}
+
+// ── AI Chat (legacy single-message history) ───────────────────
+
+model AiMessage {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  role      String
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ai_messages")
+}
+
+// ── Round 5: AI Conversations ─────────────────────────────────
+
+model Conversation {
+  id        String      @id @default(cuid())
+  userId    String      @map("user_id")
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode      TutorMode
+  title     String      @default("New Conversation")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  messages  ChatMessage[]
+
+  @@map("conversations")
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String       @db.Text
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@map("chat_messages")
+}
+
+// ── Round 5: Flashcard Decks V2 (with spaced repetition) ──────
+
+model FlashcardDeckV2 {
+  id          String          @id @default(cuid())
+  title       String
+  description String?         @db.Text
+  category    LibraryCategory @default(OTHER)
+  level       Level           @default(ND1)
+  isPublic    Boolean         @default(true) @map("is_public")
+  createdById String          @map("created_by_id")
+  createdBy   User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  cards       FlashcardCard[]
+
+  @@map("flashcard_decks_v2")
+}
+
+model FlashcardCard {
+  id        String          @id @default(cuid())
+  deckId    String          @map("deck_id")
+  deck      FlashcardDeckV2 @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  front     String          @db.Text
+  back      String          @db.Text
+  sortOrder Int             @default(0) @map("sort_order")
+  createdAt DateTime        @default(now()) @map("created_at")
+  reviews   FlashcardReview[]
+
+  @@map("flashcard_cards")
+}
+
+model FlashcardReview {
+  id           String        @id @default(cuid())
+  userId       String        @map("user_id")
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardId       String        @map("card_id")
+  card         FlashcardCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  easeFactor   Float         @default(2.5) @map("ease_factor")
+  interval     Int           @default(1)
+  repetitions  Int           @default(0)
+  nextReview   DateTime      @default(now()) @map("next_review")
+  lastReview   DateTime?     @map("last_review")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  @@unique([userId, cardId])
+  @@map("flashcard_reviews")
+}
+
+// ── Snap & Study: photo -> AI review + MCQ quiz ────────────────
+model StudySnap {
+  id            String   @id @default(cuid())
+  studentId     String   @map("student_id")
+  student       User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  imageUrl      String   @map("image_url")
+  subject       String?
+  review        String   @db.Text
+  questions     Json     @default("[]")
+  status        String   @default("READY")
+  score         Int?
+  answeredCount Int?     @map("answered_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("study_snaps")
+}

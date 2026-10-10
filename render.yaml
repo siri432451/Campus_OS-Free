@@ -1,0 +1,61 @@
+# Render Blueprint: runs CampusOS on Render's FREE plan (API + static frontend).
+# The database lives on Neon (free Postgres), NOT on Render:
+# Render's free Postgres expires after 30 days.
+# See DEPLOY_FREE_HOSTING.md for the step-by-step guide.
+
+services:
+  # ── Backend API (Node/Express + Prisma) ───────────────────────
+  - type: web
+    name: campusos-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    # dev dependencies are needed to compile TypeScript and run Prisma
+    buildCommand: npm install --include=dev && npx prisma generate && npx prisma db push --skip-generate && npm run build
+    # RUN_SEED=true seeds starter data once. Set it back to false after the first successful start.
+    startCommand: sh -c 'if [ "$RUN_SEED" = "true" ]; then node dist/seed.js; fi; node dist/index.js'
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL        # Neon connection string
+        sync: false
+      - key: JWT_SECRET          # generated for you
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: FRONTEND_URL        # the campusos-web URL, no trailing slash
+        sync: false
+      - key: UPLOAD_DIR          # free disk is temporary; uploads are lost on restart
+        value: /tmp/campusos-uploads
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        value: System Administrator
+      - key: ANTHROPIC_API_KEY   # optional, AI features need it
+        sync: false
+      - key: RESEND_API_KEY      # optional, password-reset emails need it
+        sync: false
+      - key: RUN_SEED
+        value: "true"
+
+  # ── Frontend (React + Vite, static) ───────────────────────────
+  - type: web
+    name: campusos-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install --include=dev && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite            # single-page app: send every path to index.html
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL        # the campusos-api URL, no trailing slash
+        sync: false
+      - key: VITE_APP_NAME
+        value: CampusOS
