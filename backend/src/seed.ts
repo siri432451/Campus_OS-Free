@@ -15,9 +15,12 @@ async function main() {
 
   // ── Admin ─────────────────────────────────────────────────
   const adminPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD || (DEMO ? 'Admin123!' : randomBytes(18).toString('hex')), 12)
+  // To reset a forgotten/mismatched admin password: on the host set RESET_ADMIN_PASSWORD=true,
+  // RUN_SEED=true and a new ADMIN_PASSWORD, redeploy, then set both flags back to false.
+  const resetAdmin = process.env.RESET_ADMIN_PASSWORD === 'true'
   const admin = await prisma.user.upsert({
-    where: { email: process.env.ADMIN_EMAIL || 'admin@campusos.edu.ng' },
-    update: {},
+    where: { staffId: 'ADMIN001' },
+    update: resetAdmin ? { password: adminPassword, isActive: true } : {},
     create: {
       name: process.env.ADMIN_NAME || 'System Administrator',
       email: process.env.ADMIN_EMAIL || 'admin@campusos.edu.ng',
@@ -28,6 +31,7 @@ async function main() {
     }
   })
   console.log(`✅ Admin: ${admin.email}`)
+  if (resetAdmin) console.log('🔑 Admin password was reset from ADMIN_PASSWORD')
 
   // ── Lecturers ─────────────────────────────────────────────
   const lecturerData = [
