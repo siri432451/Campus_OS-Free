@@ -27,7 +27,8 @@ router.patch('/profile', async (req: AuthRequest, res: Response): Promise<void> 
 })
 
 
-const PHOTO_DIR = '/var/www/campusos/uploads/photos'
+const UPLOAD_ROOT = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads')
+const PHOTO_DIR = path.join(UPLOAD_ROOT, 'photos')
 if (!fs.existsSync(PHOTO_DIR)) fs.mkdirSync(PHOTO_DIR, { recursive: true })
 
 const photoStorage = multer.diskStorage({
@@ -55,7 +56,7 @@ router.post('/upload-photo', photoUpload.single('photo'), async (req: AuthReques
     const photoUrl = `/uploads/photos/${req.file.filename}`
     const existing = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { photoUrl: true } })
     if (existing?.photoUrl) {
-      const oldPath = `/var/www/campusos${existing.photoUrl}`
+      const oldPath = path.join(UPLOAD_ROOT, existing.photoUrl.replace(/^\/uploads\//, ''))
       if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath)
     }
     await prisma.user.update({ where: { id: req.user!.id }, data: { photoUrl } })
