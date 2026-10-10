@@ -33,6 +33,26 @@ async function main() {
   console.log(`✅ Admin: ${admin.email}`)
   if (resetAdmin) console.log('🔑 Admin password was reset from ADMIN_PASSWORD')
 
+  // ── School Admin (ADMIN002) ───────────────────────────────
+  // Created only when SCHOOL_ADMIN_PASSWORD is set on the host.
+  // RESET_ADMIN_PASSWORD=true also resets this account's password from SCHOOL_ADMIN_PASSWORD.
+  if (process.env.SCHOOL_ADMIN_PASSWORD) {
+    const schoolPw = await bcrypt.hash(process.env.SCHOOL_ADMIN_PASSWORD, 12)
+    const schoolAdmin = await prisma.user.upsert({
+      where: { staffId: 'ADMIN002' },
+      update: resetAdmin ? { password: schoolPw, isActive: true, role: Role.SCHOOL_ADMIN } : {},
+      create: {
+        name: process.env.SCHOOL_ADMIN_NAME || 'School Admin',
+        email: process.env.SCHOOL_ADMIN_EMAIL || undefined,
+        staffId: 'ADMIN002',
+        password: schoolPw,
+        role: Role.SCHOOL_ADMIN,
+        department: 'Administration'
+      }
+    })
+    console.log(`✅ School Admin: ${schoolAdmin.staffId}`)
+  }
+
   // ── Lecturers ─────────────────────────────────────────────
   const lecturerData = [
     { name: 'Dr. Amaka Okonkwo', staffId: 'LEC001', email: 'a.okonkwo@campusos.edu.ng', department: 'Nursing Science' },
