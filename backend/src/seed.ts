@@ -53,6 +53,30 @@ async function main() {
     console.log(`✅ School Admin: ${schoolAdmin.staffId}`)
   }
 
+  // ── Registrar (REG001) ────────────────────────────────────
+  // Created only when REGISTRAR_PASSWORD is set on the host (min 10 characters).
+  // RESET_ADMIN_PASSWORD=true also resets this account's password from REGISTRAR_PASSWORD.
+  if (process.env.REGISTRAR_PASSWORD) {
+    if (process.env.REGISTRAR_PASSWORD.length < 10) {
+      console.log('⚠️  REGISTRAR_PASSWORD must be at least 10 characters — Registrar not created')
+    } else {
+      const regPw = await bcrypt.hash(process.env.REGISTRAR_PASSWORD, 12)
+      const registrar = await prisma.user.upsert({
+        where: { staffId: 'REG001' },
+        update: resetAdmin ? { password: regPw, isActive: true, role: Role.REGISTRAR } : {},
+        create: {
+          name: process.env.REGISTRAR_NAME || 'College Registrar',
+          email: process.env.REGISTRAR_EMAIL || undefined,
+          staffId: 'REG001',
+          password: regPw,
+          role: Role.REGISTRAR,
+          department: 'Registry'
+        }
+      })
+      console.log(`✅ Registrar: ${registrar.staffId}`)
+    }
+  }
+
   // ── Lecturers ─────────────────────────────────────────────
   const lecturerData = [
     { name: 'Dr. Amaka Okonkwo', staffId: 'LEC001', email: 'a.okonkwo@campusos.edu.ng', department: 'Nursing Science' },
