@@ -251,15 +251,16 @@ router.delete('/students/:id', async (req: AuthRequest, res: Response): Promise<
     const student = await prisma.user.findUnique({ where: { id } })
     if (!student || student.role !== Role.STUDENT) { res.status(404).json({ error: 'Student not found' }); return }
 
-    const [results, attendance, printJobs] = await Promise.all([
+    const [results, attendance, printJobs, transcriptScores] = await Promise.all([
       prisma.result.count({ where: { studentId: id } }),
       prisma.attendanceRecord.count({ where: { studentId: id } }),
       prisma.printJob.count({ where: { studentId: id } }),
+      prisma.transcriptScore.count({ where: { studentId: id } }),
     ])
-    if (results > 0 || attendance > 0 || printJobs > 0) {
+    if (results > 0 || attendance > 0 || printJobs > 0 || transcriptScores > 0) {
       res.status(409).json({
         error: 'This student has academic or activity records and cannot be deleted. Deactivate the account instead.',
-        counts: { results, attendance, printJobs },
+        counts: { results, attendance, printJobs, transcriptScores },
       })
       return
     }

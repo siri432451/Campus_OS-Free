@@ -32,6 +32,7 @@ import adminRoutes       from './routes/admin'
 import bulkImportRoutes  from './routes/bulkImport'
 import studySnapRoutes  from './routes/studySnap'
 import registrarRoutes   from './routes/registrar'
+import transcriptRoutes  from './routes/transcripts'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -90,6 +91,7 @@ app.use('/api/health',        healthRoutes)
 app.use('/api/admin',         adminRoutes)
 app.use('/api/admin/bulk-import', bulkImportRoutes)
 app.use('/api/study-snap',    studySnapRoutes)
+app.use('/api/registrar/transcripts', transcriptRoutes)
 app.use('/api/registrar',     registrarRoutes)
 
 // ── 404 ───────────────────────────────────────────────────────

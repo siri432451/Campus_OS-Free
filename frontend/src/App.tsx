@@ -3,11 +3,7 @@ import { useState, useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastContainer } from './components/Toast'
 import { canUpload } from './lib/libraryConstants'
-import {
-  LayoutGrid, BookOpen, Upload, BarChart3, IdCard, Printer, CreditCard, Inbox,
-  Settings, ClipboardEdit, Megaphone, Bot, Layers, Gamepad2, FolderOpen, Camera,
-  LogOut, ChevronLeft, ChevronRight, Stethoscope, Wifi,
-} from 'lucide-react'
+import { LayoutGrid, BookOpen, Upload, BarChart3, IdCard, Printer, CreditCard, Inbox, Settings, ClipboardEdit, Megaphone, Bot, Layers, Gamepad2, FolderOpen, Camera, LogOut, ChevronLeft, ChevronRight, Stethoscope, Wifi, FileText } from 'lucide-react'
 
 // Pages
 import SplashPage from './pages/Splash'
@@ -45,6 +41,7 @@ import SimulationPage from './pages/Simulation'
 import PaymentPage from './pages/Payment'
 import RegistrarDashboardPage from './pages/RegistrarDashboard'
 import RegistrarStudentsPage from './pages/RegistrarStudents'
+import RegistrarTranscriptsPage from './pages/RegistrarTranscripts'
 import StudySnapPage from './pages/StudySnap'
 
 const INSTITUTION = 'College of Nursing Sciences, Osogbo'
@@ -76,6 +73,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { path: '/lecturer/results', Icon: ClipboardEdit, label: 'Enter Results', uploadOnly: false, roles: ['LECTURER', 'SUPER_ADMIN', 'SCHOOL_ADMIN'], bottomNav: true },
   { path: '/study-snap',     Icon: Camera,        label: 'Snap & Study', uploadOnly: false, roles: ['STUDENT'] },
   { path: '/registrar/students', Icon: FolderOpen, label: 'Records',    uploadOnly: false, roles: ['REGISTRAR', 'SUPER_ADMIN', 'SCHOOL_ADMIN'], bottomNav: true },
+  { path: '/registrar/transcripts', Icon: FileText, label: 'Transcripts', uploadOnly: false, roles: ['REGISTRAR', 'SCHOOL_ADMIN'], bottomNav: false },
   { path: '/announcements',  Icon: Megaphone,     label: 'Notices',     uploadOnly: false, roles: [...STUDENT_ROLES, 'REGISTRAR'] },
   { path: '/ai',             Icon: Bot,           label: 'AI Chat',     uploadOnly: false, roles: STUDENT_ROLES },
   { path: '/flashcards',     Icon: Layers,        label: 'Flashcards',  uploadOnly: false, roles: STUDENT_ROLES },
@@ -102,7 +100,7 @@ function BottomNav() {
     const order = ['/dashboard', '/library', '/id', '/lecturer/results']
     items = order.map(p => ALL_NAV_ITEMS.find(i => i.path === p)).filter(Boolean) as typeof items
   } else if (role === 'REGISTRAR') {
-    const order = ['/dashboard', '/registrar/students', '/announcements', '/id']
+    const order = ['/dashboard', '/registrar/students', '/registrar/transcripts', '/announcements', '/id']
     items = order.map(p => ALL_NAV_ITEMS.find(i => i.path === p)).filter(Boolean) as typeof items
   }
 
@@ -351,6 +349,7 @@ function AppRoutes() {
       <Route path="/simulation"         element={<ProtectedRoute><SimulationPage /></ProtectedRoute>} />
       <Route path="/payment"            element={<ProtectedRoute><PaymentPage /></ProtectedRoute>} />
       <Route path="/registrar/students" element={<ProtectedRoute><RegistrarStudentsPage /></ProtectedRoute>} />
+      <Route path="/registrar/transcripts" element={<ProtectedRoute><RegistrarTranscriptsPage /></ProtectedRoute>} />
       <Route path="/study-snap"         element={<ProtectedRoute><StudySnapPage /></ProtectedRoute>} />
       <Route path="*"                   element={<Navigate to="/" />} />
     </Routes>

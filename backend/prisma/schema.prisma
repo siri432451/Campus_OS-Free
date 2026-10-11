@@ -189,6 +189,10 @@ model User {
   createdDecks       FlashcardDeckV2[]
   studySnaps         StudySnap[]
 
+  // Transcripts
+  academicProfile  AcademicProfile? @relation("StudentAcademicProfile")
+  transcriptScores TranscriptScore[] @relation("StudentTranscriptScores")
+
   admissionDate DateTime? @map("admission_date")
 
   @@map("users")
@@ -544,4 +548,67 @@ model StudySnap {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("study_snaps")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Transcripts (Registrar)
+// ═══════════════════════════════════════════════════════════════
+
+// Standard curriculum for a programme: gives hours and credit units for each course.
+model TranscriptCourse {
+  id             String   @id @default(uuid())
+  programme      String   @default("BASIC_NURSING")
+  yearOfStudy    Int      @map("year_of_study")
+  semester       Int
+  serial         Int
+  code           String
+  key            String
+  title          String
+  lectureHours   Int      @default(0) @map("lecture_hours")
+  practicalHours Int      @default(0) @map("practical_hours")
+  creditUnit     Int      @map("credit_unit")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  scores TranscriptScore[]
+
+  @@unique([programme, key])
+  @@unique([programme, yearOfStudy, semester, serial])
+  @@map("transcript_courses")
+}
+
+// A student's (or alumnus's) exam score for one curriculum course.
+model TranscriptScore {
+  id          String   @id @default(uuid())
+  studentId   String   @map("student_id")
+  courseId    String   @map("course_id")
+  score       Float
+  enteredById String?  @map("entered_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  student User             @relation("StudentTranscriptScores", fields: [studentId], references: [id])
+  course  TranscriptCourse @relation(fields: [courseId], references: [id])
+
+  @@unique([studentId, courseId])
+  @@map("transcript_scores")
+}
+
+// Details printed on the transcript that are not part of the normal student record.
+model AcademicProfile {
+  id             String   @id @default(uuid())
+  studentId      String   @unique @map("student_id")
+  programme      String   @default("BASIC_NURSING")
+  refNo          String?  @map("ref_no")
+  programmeTitle String?  @map("programme_title")
+  certificate    String?
+  entryMonth     String?  @map("entry_month")
+  completionMonth String? @map("completion_month")
+  conduct        String?
+  examYear       String?  @map("exam_year")
+  examResult     String?  @map("exam_result")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  student User @relation("StudentAcademicProfile", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("academic_profiles")
 }
