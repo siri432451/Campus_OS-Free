@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Search, FileText, Upload, Download, Save } from 'lucide-react'
 import api from '../api/client'
 
@@ -83,6 +83,7 @@ function Field({ label, value, onChange, type = 'text', placeholder }: {
 
 export default function RegistrarTranscriptsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [catalogCount, setCatalogCount] = useState<number | null>(null)
   const [q, setQ] = useState('')
@@ -106,6 +107,13 @@ export default function RegistrarTranscriptsPage() {
   }, [])
 
   useEffect(() => { loadCatalog() }, [loadCatalog])
+
+  // Opened from a transcript request: /registrar/transcripts?student=<id>
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get('student')
+    if (id) openStudent({ id, name: '', matricNo: null, level: null, department: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const loadDefaultCatalog = async () => {
     setBusy('catalog')
@@ -133,7 +141,8 @@ export default function RegistrarTranscriptsPage() {
       const r = await api.get(`/api/registrar/transcripts/students/${s.id}`)
       const list: Course[] = r.data.courses
       const p = r.data.profile
-      setSelected(s)
+      const st = r.data.student
+      setSelected({ id: st.id, name: st.name, matricNo: st.matricNo, level: st.level, department: st.department })
       setCourses(list)
       setProfile(p ? {
         refNo: p.refNo || '', programmeTitle: p.programmeTitle || '', certificate: p.certificate || '',

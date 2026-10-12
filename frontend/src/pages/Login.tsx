@@ -120,6 +120,10 @@ export default function Login() {
         <p className="mt-5 text-center text-xs" style={{ color: '#8A9BB0' }}>
           Having trouble?{' '}<span className="font-semibold cursor-pointer text-ink">Contact your ICT Admin</span>
         </p>
+        <p className="mt-2 text-center text-xs" style={{ color: '#8A9BB0' }}>
+          Alumnus or former student?{' '}
+          <span className="font-semibold cursor-pointer text-ink" onClick={() => navigate('/request-transcript')}>Request a transcript</span>
+        </p>
       </div>
     </div>
   )

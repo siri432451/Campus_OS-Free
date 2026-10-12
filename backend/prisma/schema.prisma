@@ -612,3 +612,41 @@ model AcademicProfile {
 
   @@map("academic_profiles")
 }
+
+// A transcript request from a student or alumnus (no account needed).
+// Receipts are stored in the database because the free server's disk is temporary.
+model TranscriptRequest {
+  id                  String    @id @default(uuid())
+  trackingCode        String    @unique @map("tracking_code")
+  status              String    @default("RECEIVED")
+  applicantName       String    @map("applicant_name")
+  matricNo            String?   @map("matric_no")
+  entryYear           String?   @map("entry_year")
+  completionYear      String?   @map("completion_year")
+  email               String
+  phone               String
+  phoneKey            String    @map("phone_key")
+  purpose             String?
+  delivery            String
+  institutionName     String?   @map("institution_name")
+  institutionLocation String?   @map("institution_location")
+  institutionEmail    String?   @map("institution_email")
+  note                String?
+  feeAmount           Int       @map("fee_amount")
+  receiptMime         String?   @map("receipt_mime")
+  receiptData         Bytes?    @map("receipt_data")
+  studentId           String?   @map("student_id")
+  rejectionReason     String?   @map("rejection_reason")
+  registrarNote       String?   @map("registrar_note")
+  transcriptNo        String?   @unique @map("transcript_no")
+  verifyCode          String?   @unique @map("verify_code")
+  issuedAt            DateTime? @map("issued_at")
+  issuedById          String?   @map("issued_by_id")
+  issuedSnapshot      String?   @map("issued_snapshot")
+  sentAt              DateTime? @map("sent_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("transcript_requests")
+}

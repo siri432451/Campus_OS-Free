@@ -42,6 +42,10 @@ import PaymentPage from './pages/Payment'
 import RegistrarDashboardPage from './pages/RegistrarDashboard'
 import RegistrarStudentsPage from './pages/RegistrarStudents'
 import RegistrarTranscriptsPage from './pages/RegistrarTranscripts'
+import RegistrarTranscriptRequestsPage from './pages/RegistrarTranscriptRequests'
+import PublicTranscriptRequestPage from './pages/PublicTranscriptRequest'
+import TrackTranscriptPage from './pages/TrackTranscript'
+import VerifyTranscriptPage from './pages/VerifyTranscript'
 import StudySnapPage from './pages/StudySnap'
 
 const INSTITUTION = 'College of Nursing Sciences, Osogbo'
@@ -74,6 +78,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { path: '/study-snap',     Icon: Camera,        label: 'Snap & Study', uploadOnly: false, roles: ['STUDENT'] },
   { path: '/registrar/students', Icon: FolderOpen, label: 'Records',    uploadOnly: false, roles: ['REGISTRAR', 'SUPER_ADMIN', 'SCHOOL_ADMIN'], bottomNav: true },
   { path: '/registrar/transcripts', Icon: FileText, label: 'Transcripts', uploadOnly: false, roles: ['REGISTRAR', 'SCHOOL_ADMIN'], bottomNav: false },
+  { path: '/registrar/transcript-requests', Icon: Inbox, label: 'Requests', uploadOnly: false, roles: ['REGISTRAR', 'SCHOOL_ADMIN'], bottomNav: false },
   { path: '/announcements',  Icon: Megaphone,     label: 'Notices',     uploadOnly: false, roles: [...STUDENT_ROLES, 'REGISTRAR'] },
   { path: '/ai',             Icon: Bot,           label: 'AI Chat',     uploadOnly: false, roles: STUDENT_ROLES },
   { path: '/flashcards',     Icon: Layers,        label: 'Flashcards',  uploadOnly: false, roles: STUDENT_ROLES },
@@ -322,6 +327,9 @@ function AppRoutes() {
       <Route path="/" element={user ? <Navigate to="/dashboard" /> : <SplashPage />} />
       <Route path="/login"              element={<LoginPage />} />
       <Route path="/forgot-password"    element={<ForgotPasswordPage />} />
+      <Route path="/request-transcript" element={<PublicTranscriptRequestPage />} />
+      <Route path="/track-transcript"   element={<TrackTranscriptPage />} />
+      <Route path="/verify/:code"       element={<VerifyTranscriptPage />} />
       <Route path="/dashboard"          element={<ProtectedRoute><RoleAwareDashboard /></ProtectedRoute>} />
       <Route path="/onboarding/email"   element={<ProtectedRoute><OnboardingEmailPage /></ProtectedRoute>} />
       <Route path="/onboarding/biodata"   element={<ProtectedRoute><OnboardingBiodataPage /></ProtectedRoute>} />
@@ -350,6 +358,7 @@ function AppRoutes() {
       <Route path="/payment"            element={<ProtectedRoute><PaymentPage /></ProtectedRoute>} />
       <Route path="/registrar/students" element={<ProtectedRoute><RegistrarStudentsPage /></ProtectedRoute>} />
       <Route path="/registrar/transcripts" element={<ProtectedRoute><RegistrarTranscriptsPage /></ProtectedRoute>} />
+      <Route path="/registrar/transcript-requests" element={<ProtectedRoute><RegistrarTranscriptRequestsPage /></ProtectedRoute>} />
       <Route path="/study-snap"         element={<ProtectedRoute><StudySnapPage /></ProtectedRoute>} />
       <Route path="*"                   element={<Navigate to="/" />} />
     </Routes>

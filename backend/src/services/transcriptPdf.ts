@@ -1,3 +1,5 @@
+import fs from 'fs'
+import path from 'path'
 import PDFDocument from 'pdfkit'
 import type { Response } from 'express'
 import { TranscriptData, TranscriptRow, YEAR_WORDS, SEM_WORDS, monthLabel, ordinalDate, dobLabel } from './transcriptData'
@@ -87,7 +89,7 @@ function dataRow(doc: Doc, y: number, r: TranscriptRow): number {
     if (i === 8) {
       const size = fitFont(doc, 'Times-Bold', vals[i], w - 8, 8.5)
       doc.font('Times-Bold').fontSize(size)
-      doc.text(vals[i], x + 4, y + (h - size) / 2 - 1, { width: w - 8, align: 'center', lineBreak: false })
+      doc.text(vals[i], x + 4, y + 6 + (9 - size) / 2, { width: w - 8, align: 'center', lineBreak: false })
     } else {
       doc.font('Times-Roman').fontSize(9)
       doc.text(vals[i], x + 4, y + 6, { width: w - 8, align: i === 2 ? 'left' : 'center' })
@@ -111,9 +113,10 @@ function totalRow(doc: Doc, y: number, lecture: number, practical: number): numb
 }
 
 // ── Pages ─────────────────────────────────────────────────────
-function titlePage(doc: Doc, data: TranscriptData, addressee: string[]): void {
+function titlePage(doc: Doc, data: TranscriptData, addressee: string[], issuedAt: Date, transcriptNo?: string): void {
   let y = 46
-  doc.fillColor('#000000').font('Times-Bold').fontSize(24)
+  const nameSize = fitFont(doc, 'Times-Bold', INSTITUTION, CW, 24)
+  doc.fillColor('#000000').font('Times-Bold').fontSize(nameSize)
   doc.text(INSTITUTION, MARGIN, y, { width: CW, align: 'center' })
   y = doc.y + 4
   doc.font('Times-Roman').fontSize(12.5)
@@ -133,8 +136,8 @@ function titlePage(doc: Doc, data: TranscriptData, addressee: string[]): void {
   y += 22
   const p = data.profile
   doc.font('Times-Bold').fontSize(10.5)
-  doc.text(`OUR REF. NO: ${p?.refNo || ''}`, MARGIN, y, { width: CW / 2, align: 'left' })
-  doc.text(`DATE: ${ordinalDate(new Date())}`, MARGIN, y, { width: CW, align: 'right' })
+  doc.text(`OUR REF. NO: ${p?.refNo || transcriptNo || ''}`, MARGIN, y, { width: CW / 2, align: 'left' })
+  doc.text(`DATE: ${ordinalDate(issuedAt)}`, MARGIN, y, { width: CW, align: 'right' })
 
   // Addressee (or dotted lines to be filled in by hand)
   y += 34
@@ -171,23 +174,24 @@ function titlePage(doc: Doc, data: TranscriptData, addressee: string[]): void {
 
   const pieces: Array<{ t: string; bold?: boolean }> = [
     { t: 'This is to certify that ' },
-    { t: s.name.toUpperCase(), bold: true },
+    { t: `${s.name.toUpperCase()} `, bold: true },
   ]
   if (entry && done) {
-    pieces.push({ t: ` entered this College for the programme of ${programme} in ` })
-    pieces.push({ t: entry, bold: true })
-    pieces.push({ t: ' and completed the course in ' })
-    pieces.push({ t: `${done}.`, bold: true })
+    pieces.push({ t: `entered this College for the programme of ${programme} in ` })
+    pieces.push({ t: `${entry} `, bold: true })
+    pieces.push({ t: 'and completed the course in ' })
+    pieces.push({ t: `${done}. `, bold: true })
   } else if (entry) {
-    pieces.push({ t: ` entered this College for the programme of ${programme} in ` })
-    pieces.push({ t: `${entry}.`, bold: true })
+    pieces.push({ t: `entered this College for the programme of ${programme} in ` })
+    pieces.push({ t: `${entry}. `, bold: true })
   } else {
-    pieces.push({ t: ` is a student of this College in the programme of ${programme}.` })
+    pieces.push({ t: `is a student of this College in the programme of ${programme}. ` })
   }
   if (done && p?.certificate) {
-    pieces.push({ t: ` On completion, ${who} was awarded the ${p.certificate}.` })
+    pieces.push({ t: `On completion, ${who} was awarded the ${p.certificate}. ` })
   }
-  pieces.push({ t: ` During ${known ? whose : 'the'} training, ${whose} conduct was ${p?.conduct || 'satisfactory'}. ` })
+  const conduct = (p?.conduct || 'satisfactory').toLowerCase()
+  pieces.push({ t: `During ${known ? whose : 'the'} training, ${whose} conduct was ${conduct}. ` })
   pieces.push({ t: 'All courses were taught in ENGLISH LANGUAGE.', bold: true })
 
   doc.fontSize(12)
@@ -245,7 +249,9 @@ function semesterPages(doc: Doc, data: TranscriptData): void {
   })
 }
 
-function notesPage(doc: Doc, data: TranscriptData): void {
+const ASSETS = path.join(__dirname, '../../assets')
+
+function notesPage(doc: Doc, data: TranscriptData, official?: OfficialOptions): void {
   doc.addPage()
   const p = data.profile
   let y = 60
@@ -289,21 +295,49 @@ function notesPage(doc: Doc, data: TranscriptData): void {
   }
 
   // Signature block
-  const sy = Math.max(y + 70, PAGE_H - 190)
-  doc.lineWidth(0.8).strokeColor('#000000')
-    .moveTo(PAGE_W - MARGIN - 190, sy).lineTo(PAGE_W - MARGIN, sy).stroke()
-  doc.font('Times-Bold').fontSize(11)
-  doc.text('REGISTRAR', PAGE_W - MARGIN - 190, sy + 5, { width: 190, align: 'center' })
+  const sy = Math.max(y + 90, PAGE_H - 190)
+  const sigX = PAGE_W - MARGIN - 190
+  if (official) {
+    const sig = path.join(ASSETS, 'registrar-signature.png')
+    const stamp = path.join(ASSETS, 'registrar-stamp.png')
+    if (fs.existsSync(sig)) doc.image(sig, sigX + 25, sy - 52, { fit: [140, 48] })
+    if (fs.existsSync(stamp)) doc.image(stamp, sigX - 95, sy - 82, { fit: [90, 90] })
+  }
+  doc.lineWidth(0.8).strokeColor('#000000').moveTo(sigX, sy).lineTo(PAGE_W - MARGIN, sy).stroke()
+  doc.fillColor('#000000').font('Times-Bold').fontSize(11)
+  doc.text('REGISTRAR', sigX, sy + 5, { width: 190, align: 'center' })
   doc.font('Times-Roman').fontSize(10)
-  doc.text('Date: ............................', PAGE_W - MARGIN - 190, sy + 22, { width: 190, align: 'center' })
-  doc.font('Times-Italic').fontSize(9)
-  doc.text('Valid only when signed and stamped by the Registrar.', MARGIN, sy + 5, { width: 250 })
+  doc.text(official ? `Date: ${ordinalDate(official.issuedAt)}` : 'Date: ............................',
+    sigX, sy + 22, { width: 190, align: 'center' })
+
+  if (official) {
+    // QR code + verification details
+    doc.image(official.qrPng, MARGIN, sy - 40, { width: 82 })
+    doc.font('Times-Bold').fontSize(9.5)
+    doc.text(`Transcript No: ${official.transcriptNo}`, MARGIN + 92, sy - 34, { width: 230 })
+    doc.font('Times-Roman').fontSize(8.5)
+    doc.text('Scan the code, or visit the address below, to confirm that this transcript is genuine:',
+      MARGIN + 92, doc.y + 3, { width: 230 })
+    doc.font('Times-Italic').fontSize(8.5)
+    doc.text(official.verifyUrl, MARGIN + 92, doc.y + 3, { width: 230 })
+  } else {
+    doc.font('Times-Italic').fontSize(9)
+    doc.text('Valid only when signed and stamped by the Registrar.', MARGIN, sy + 5, { width: 250 })
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────
+export interface OfficialOptions {
+  transcriptNo: string
+  verifyUrl: string
+  qrPng: Buffer
+  issuedAt: Date
+}
+
 export interface PdfOptions {
   preview?: boolean
   addressee?: string[]
+  official?: OfficialOptions
 }
 
 export function streamTranscriptPdf(res: Response, data: TranscriptData, opts: PdfOptions = {}): void {
@@ -317,13 +351,14 @@ export function streamTranscriptPdf(res: Response, data: TranscriptData, opts: P
   res.setHeader('Content-Disposition', `inline; filename="transcript-${safeName}.pdf"`)
   doc.pipe(res)
 
-  if (opts.preview) {
+  if (opts.preview && !opts.official) {
     watermark(doc, 'PREVIEW')
     doc.on('pageAdded', () => watermark(doc, 'PREVIEW'))
   }
 
-  titlePage(doc, data, opts.addressee || [])
+  const issuedAt = opts.official?.issuedAt ?? new Date()
+  titlePage(doc, data, opts.addressee || [], issuedAt, opts.official?.transcriptNo)
   semesterPages(doc, data)
-  notesPage(doc, data)
+  notesPage(doc, data, opts.official)
   doc.end()
 }

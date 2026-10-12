@@ -6,6 +6,9 @@ import { authenticate, requireRole, AuthRequest } from '../middleware/auth'
 import { BASIC_NURSING, BASIC_NURSING_CURRICULUM } from '../data/basicNursingCurriculum'
 import { loadTranscript, normCode } from '../services/transcriptData'
 import { streamTranscriptPdf } from '../services/transcriptPdf'
+import {
+  STATUS_LABELS, nextTranscriptNo, randomCode, sendOfficialPdf, snapshotOf,
+} from '../services/transcriptRequests'
 
 const router = Router()
 router.use(authenticate)
@@ -308,6 +311,216 @@ router.get('/students/:id/pdf', async (req: AuthRequest, res: Response): Promise
     if (!t) { res.status(404).json({ error: 'Student not found' }); return }
     if (!t.semesters.length) { res.status(400).json({ error: 'No scores have been entered for this student yet.' }); return }
     streamTranscriptPdf(res, t, { preview: true })
+  } catch {
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to build the transcript' })
+    else res.end()
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// Transcript requests (from students and alumni)
+// ═══════════════════════════════════════════════════════════════
+
+const REQUEST_FIELDS = {
+  id: true, trackingCode: true, status: true, applicantName: true, matricNo: true,
+  entryYear: true, completionYear: true, email: true, phone: true, purpose: true,
+  delivery: true, institutionName: true, institutionLocation: true, institutionEmail: true,
+  note: true, feeAmount: true, receiptMime: true, studentId: true, rejectionReason: true,
+  registrarNote: true, transcriptNo: true, verifyCode: true, issuedAt: true, sentAt: true,
+  createdAt: true, updatedAt: true,
+} as const
+
+// ── GET /requests?status= ─────────────────────────────────────
+router.get('/requests', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const status = typeof req.query.status === 'string' && STATUS_LABELS[req.query.status] ? req.query.status : undefined
+    const [requests, grouped] = await Promise.all([
+      prisma.transcriptRequest.findMany({
+        where: status ? { status } : {},
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: {
+          id: true, trackingCode: true, status: true, applicantName: true, matricNo: true,
+          delivery: true, institutionName: true, feeAmount: true, createdAt: true, studentId: true, transcriptNo: true,
+        },
+      }),
+      prisma.transcriptRequest.groupBy({ by: ['status'], _count: { _all: true } }),
+    ])
+    const counts: Record<string, number> = {}
+    for (const g of grouped) counts[g.status] = g._count._all
+    res.json({ requests, counts })
+  } catch {
+    res.status(500).json({ error: 'Failed to load requests' })
+  }
+})
+
+// ── GET /requests/:id ─────────────────────────────────────────
+router.get('/requests/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: req.params.id }, select: REQUEST_FIELDS })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    let student = null
+    let recordedCourses = 0
+    if (r.studentId) {
+      const t = await loadTranscript(r.studentId)
+      if (t) {
+        student = { id: t.student.id, name: t.student.name, matricNo: t.student.matricNo, level: t.student.level, department: t.student.department }
+        recordedCourses = t.courses.filter(c => c.score !== null).length
+      }
+    }
+    res.json({ request: r, student, recordedCourses, statusLabel: STATUS_LABELS[r.status] || r.status })
+  } catch {
+    res.status(500).json({ error: 'Failed to load the request' })
+  }
+})
+
+// ── GET /requests/:id/suggest — possible matching student records ──
+router.get('/requests/:id/suggest', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({
+      where: { id: req.params.id }, select: { applicantName: true, matricNo: true },
+    })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    const or: Array<Record<string, unknown>> = [{ name: { contains: r.applicantName, mode: 'insensitive' } }]
+    if (r.matricNo) or.push({ matricNo: { equals: r.matricNo, mode: 'insensitive' } })
+    const students = await prisma.user.findMany({
+      where: { role: Role.STUDENT, OR: or },
+      select: { id: true, name: true, matricNo: true, level: true, department: true },
+      take: 8,
+    })
+    res.json({ students })
+  } catch {
+    res.status(500).json({ error: 'Failed to search' })
+  }
+})
+
+// ── GET /requests/:id/receipt ─────────────────────────────────
+router.get('/requests/:id/receipt', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({
+      where: { id: req.params.id }, select: { receiptData: true, receiptMime: true },
+    })
+    if (!r || !r.receiptData || !r.receiptMime) { res.status(404).json({ error: 'No receipt on file' }); return }
+    res.setHeader('Content-Type', r.receiptMime)
+    res.setHeader('Content-Disposition', 'inline; filename="payment-receipt"')
+    res.send(Buffer.from(r.receiptData))
+  } catch {
+    res.status(500).json({ error: 'Failed to load the receipt' })
+  }
+})
+
+// ── POST /requests/:id/match ──────────────────────────────────
+router.post('/requests/:id/match', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const studentId = req.body?.studentId
+    if (typeof studentId !== 'string' || !(await requireStudent(studentId))) {
+      res.status(404).json({ error: 'Student not found' }); return
+    }
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: req.params.id }, select: { transcriptNo: true } })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    if (r.transcriptNo) { res.status(409).json({ error: 'This transcript has already been issued.' }); return }
+    await prisma.transcriptRequest.update({ where: { id: req.params.id }, data: { studentId } })
+    res.json({ ok: true })
+  } catch {
+    res.status(500).json({ error: 'Failed to match the record' })
+  }
+})
+
+// ── POST /requests/:id/status — review / awaiting records ─────
+router.post('/requests/:id/status', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const status = req.body?.status
+    if (status !== 'UNDER_REVIEW' && status !== 'AWAITING_RECORDS') { res.status(400).json({ error: 'Invalid status' }); return }
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: req.params.id }, select: { transcriptNo: true } })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    if (r.transcriptNo) { res.status(409).json({ error: 'This transcript has already been issued.' }); return }
+    await prisma.transcriptRequest.update({
+      where: { id: req.params.id },
+      data: { status, registrarNote: cleanText(req.body?.note, 500), rejectionReason: null },
+    })
+    res.json({ ok: true })
+  } catch {
+    res.status(500).json({ error: 'Failed to update the request' })
+  }
+})
+
+// ── POST /requests/:id/reject ─────────────────────────────────
+router.post('/requests/:id/reject', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const reason = cleanText(req.body?.reason, 500)
+    if (!reason || reason.length < 3) { res.status(400).json({ error: 'Please give a reason for rejecting this request.' }); return }
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: req.params.id }, select: { transcriptNo: true } })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    if (r.transcriptNo) { res.status(409).json({ error: 'This transcript has already been issued.' }); return }
+    await prisma.transcriptRequest.update({ where: { id: req.params.id }, data: { status: 'REJECTED', rejectionReason: reason } })
+    res.json({ ok: true })
+  } catch {
+    res.status(500).json({ error: 'Failed to reject the request' })
+  }
+})
+
+// ── POST /requests/:id/approve — issue the official transcript ─
+router.post('/requests/:id/approve', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({
+      where: { id: req.params.id }, select: { studentId: true, transcriptNo: true },
+    })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    if (r.transcriptNo) { res.status(409).json({ error: 'This transcript has already been issued.' }); return }
+    if (!r.studentId) { res.status(400).json({ error: 'Match this request to a student record first.' }); return }
+
+    const t = await loadTranscript(r.studentId)
+    if (!t || !t.semesters.length) {
+      res.status(400).json({ error: 'No scores have been entered for this student yet. Add them under Transcripts first.' }); return
+    }
+
+    let verifyCode = ''
+    for (let i = 0; i < 5 && !verifyCode; i++) {
+      const candidate = randomCode(10)
+      const clash = await prisma.transcriptRequest.findUnique({ where: { verifyCode: candidate }, select: { id: true } })
+      if (!clash) verifyCode = candidate
+    }
+    if (!verifyCode) { res.status(500).json({ error: 'Could not issue the transcript. Please try again.' }); return }
+
+    const transcriptNo = await nextTranscriptNo()
+    await prisma.transcriptRequest.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'APPROVED', transcriptNo, verifyCode, issuedAt: new Date(), issuedById: req.user?.id,
+        issuedSnapshot: snapshotOf(t), rejectionReason: null,
+      },
+    })
+    res.json({ ok: true, transcriptNo })
+  } catch {
+    res.status(500).json({ error: 'Failed to issue the transcript' })
+  }
+})
+
+// ── POST /requests/:id/mark-sent — after sending to the institution ─
+router.post('/requests/:id/mark-sent', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: req.params.id }, select: { transcriptNo: true, delivery: true } })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    if (!r.transcriptNo) { res.status(400).json({ error: 'Approve and issue the transcript first.' }); return }
+    await prisma.transcriptRequest.update({ where: { id: req.params.id }, data: { status: 'SENT', sentAt: new Date() } })
+    res.json({ ok: true })
+  } catch {
+    res.status(500).json({ error: 'Failed to update the request' })
+  }
+})
+
+// ── GET /requests/:id/pdf — the official transcript ───────────
+router.get('/requests/:id/pdf', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({
+      where: { id: req.params.id },
+      select: {
+        delivery: true, institutionName: true, institutionLocation: true,
+        transcriptNo: true, verifyCode: true, issuedAt: true, issuedSnapshot: true,
+      },
+    })
+    if (!r || !r.transcriptNo) { res.status(400).json({ error: 'This transcript has not been issued yet.' }); return }
+    await sendOfficialPdf(res, r)
   } catch {
     if (!res.headersSent) res.status(500).json({ error: 'Failed to build the transcript' })
     else res.end()
