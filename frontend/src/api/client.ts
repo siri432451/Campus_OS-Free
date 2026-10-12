@@ -17,7 +17,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // Public pages (e.g. transcript requests) must never bounce the visitor to the login page
+    const url: string = err.config?.url || ''
+    if (err.response?.status === 401 && !url.includes('/api/public/')) {
       localStorage.removeItem('campusos_token')
       localStorage.removeItem('campusos_user')
       window.location.href = '/login'

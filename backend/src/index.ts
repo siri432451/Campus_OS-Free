@@ -73,6 +73,9 @@ app.get('/health', (_, res) => {
 })
 
 // ── Routes ────────────────────────────────────────────────────
+// Public routes (no login) must come BEFORE app.use('/api', flashcardRoutes) below,
+// because that router requires a login for everything under /api.
+app.use('/api/public/transcripts', publicTranscriptRoutes)
 app.use('/api/auth',          authLimiter, authRoutes)
 app.use('/api/users',         userRoutes)
 app.use('/api/books',         bookRoutes)           // deprecated alias
@@ -93,7 +96,6 @@ app.use('/api/admin',         adminRoutes)
 app.use('/api/admin/bulk-import', bulkImportRoutes)
 app.use('/api/study-snap',    studySnapRoutes)
 app.use('/api/registrar/transcripts', transcriptRoutes)
-app.use('/api/public/transcripts', publicTranscriptRoutes)
 app.use('/api/registrar',     registrarRoutes)
 
 // ── 404 ───────────────────────────────────────────────────────
