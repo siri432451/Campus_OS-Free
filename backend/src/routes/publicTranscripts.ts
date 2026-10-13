@@ -5,7 +5,7 @@ import prisma from '../utils/prisma'
 import { TranscriptData } from '../services/transcriptData'
 import {
   INSTITUTION_NAME, STATUS_LABELS, EMAIL_RE, bankDetails, feeFor, phoneKey,
-  randomCode, sniffReceipt, sendOfficialPdf,
+  randomCode, sniffReceipt, sendOfficialPdf, notifyReceived,
 } from '../services/transcriptRequests'
 
 // No login is needed for these routes (alumni have no accounts), so they are rate limited.
@@ -93,7 +93,7 @@ router.post('/requests', submitLimiter, receiptUpload, async (req: Request, res:
     for (let attempt = 0; attempt < 5; attempt++) {
       const trackingCode = `TR-${randomCode(6)}`
       try {
-        await prisma.transcriptRequest.create({
+        const created = await prisma.transcriptRequest.create({
           data: {
             trackingCode, applicantName, matricNo, entryYear, completionYear, email, phone,
             phoneKey: phoneKey(phone), purpose, delivery, institutionName, institutionLocation,
@@ -101,6 +101,7 @@ router.post('/requests', submitLimiter, receiptUpload, async (req: Request, res:
           },
         })
         res.status(201).json({ ok: true, trackingCode, feeAmount })
+        void notifyReceived(created)
         return
       } catch (e) {
         if ((e as { code?: string }).code !== 'P2002') throw e
@@ -131,7 +132,7 @@ function statusMessage(r: { status: string; delivery: string; institutionName: s
         ? 'Your transcript is ready. You can download it below.'
         : `Your transcript has been approved and will be sent to ${r.institutionName || 'the institution'}.`
     case 'SENT': return r.delivery === 'SELF'
-      ? 'Your transcript has been issued. You can download it below.'
+      ? 'Your transcript has been emailed to you. You can also download it below.'
       : `Your transcript has been sent to ${r.institutionName || 'the institution'}.`
     case 'REJECTED': return 'Your request could not be approved.'
     default: return ''

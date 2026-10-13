@@ -644,6 +644,10 @@ model TranscriptRequest {
   issuedById          String?   @map("issued_by_id")
   issuedSnapshot      String?   @map("issued_snapshot")
   sentAt              DateTime? @map("sent_at")
+  emailStatus         String?   @map("email_status")
+  emailTo             String?   @map("email_to")
+  emailSentAt         DateTime? @map("email_sent_at")
+  emailError          String?   @map("email_error")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 

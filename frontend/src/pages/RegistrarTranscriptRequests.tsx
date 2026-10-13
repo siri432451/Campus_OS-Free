@@ -32,6 +32,10 @@ interface RequestDetail extends RequestRow {
   verifyCode: string | null
   issuedAt: string | null
   sentAt: string | null
+  emailStatus: string | null
+  emailTo: string | null
+  emailSentAt: string | null
+  emailError: string | null
 }
 
 interface StudentLite {
@@ -92,6 +96,7 @@ export default function RegistrarTranscriptRequestsPage() {
   const [found, setFound] = useState<StudentLite[]>([])
   const [reason, setReason] = useState('')
   const [rejecting, setRejecting] = useState(false)
+  const [altEmail, setAltEmail] = useState('')
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState('')
 
@@ -117,6 +122,7 @@ export default function RegistrarTranscriptRequestsPage() {
       setRecorded(r.data.recordedCourses)
       setRejecting(false)
       setReason('')
+      setAltEmail('')
       setQ('')
       setFound([])
       setSuggestions([])
@@ -172,9 +178,17 @@ export default function RegistrarTranscriptRequestsPage() {
     if (!window.confirm('Issue the official transcript now? The scores as they are today will be locked into it.')) return
     act('approve', async () => {
       const r = await api.post(`/api/registrar/transcripts/requests/${openId}/approve`)
-      return `Transcript issued: ${r.data.transcriptNo}`
+      return r.data.emailed
+        ? `Transcript ${r.data.transcriptNo} issued and emailed to ${r.data.emailTo}.`
+        : `Transcript ${r.data.transcriptNo} issued, but the email was NOT sent: ${r.data.emailError || 'unknown error'}`
     })
   }
+
+  const sendEmail = () => act('email', async () => {
+    const r = await api.post(`/api/registrar/transcripts/requests/${openId}/send-email`, { to: altEmail.trim() || undefined })
+    setAltEmail('')
+    return r.data.ok ? `Emailed to ${r.data.to}.` : `Email not sent: ${r.data.error || 'unknown error'}`
+  })
 
   const markSent = () => act('sent', async () => {
     await api.post(`/api/registrar/transcripts/requests/${openId}/mark-sent`)
@@ -379,6 +393,29 @@ export default function RegistrarTranscriptRequestsPage() {
                 )}
               </div>
 
+              {issued && (
+                <div className="mt-4 p-3 rounded-xl border border-mossline">
+                  <div className="text-sm">
+                    {detail.emailStatus === 'SENT' && (
+                      <span className="text-ink">Emailed to <b>{detail.emailTo}</b>{detail.emailSentAt ? ` on ${dateText(detail.emailSentAt)}` : ''}.</span>
+                    )}
+                    {detail.emailStatus === 'FAILED' && (
+                      <span style={{ color: '#B42318' }}>Email not sent{detail.emailTo ? ` to ${detail.emailTo}` : ''}: {detail.emailError}</span>
+                    )}
+                    {!detail.emailStatus && <span className="text-text2">Not emailed yet.</span>}
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                    <input value={altEmail} onChange={e => setAltEmail(e.target.value)} type="email"
+                      placeholder={`Send to a different address (optional). Default: ${detail.delivery === 'INSTITUTION' ? (detail.institutionEmail || 'institution') : detail.email}`}
+                      className="flex-1 px-3 py-2 rounded-xl text-sm border border-mossline outline-none text-ink" />
+                    <button onClick={sendEmail} disabled={!!busy}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-white border-0 cursor-pointer bg-field disabled:opacity-60">
+                      {busy === 'email' ? 'Sending\u2026' : detail.emailStatus === 'SENT' ? 'Send again' : 'Send by email'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {!student && !issued && !final && <p className="text-xs text-text2 mt-2">Match a student record before approving.</p>}
               {detail.status === 'REJECTED' && (
                 <button onClick={() => setStatus('UNDER_REVIEW')} disabled={!!busy}
@@ -396,9 +433,10 @@ export default function RegistrarTranscriptRequestsPage() {
                 </div>
               )}
 
-              {issued && detail.delivery === 'INSTITUTION' && (
+              {issued && detail.emailStatus !== 'SENT' && (
                 <p className="text-xs text-text2 mt-3">
-                  Sending by email is not set up yet. Open the official PDF, send it to {detail.institutionEmail || 'the institution'}, then click "Mark as sent".
+                  If the email does not go through, correct the address above and send again, or open the official PDF,
+                  send it yourself and click "Mark as sent".
                 </p>
               )}
             </div>

@@ -3,7 +3,11 @@ import QRCode from 'qrcode'
 import type { Response } from 'express'
 import prisma from '../utils/prisma'
 import { TranscriptData } from './transcriptData'
-import { streamTranscriptPdf } from './transcriptPdf'
+import { streamTranscriptPdf, transcriptPdfBuffer, PdfOptions } from './transcriptPdf'
+import { sendMail } from './mailer'
+import {
+  baseUrl, receivedEmail, applicantTranscriptEmail, institutionTranscriptEmail, sentNoticeEmail, rejectedEmail,
+} from './transcriptEmails'
 
 // ── Settings (override with environment variables) ────────────
 export const INSTITUTION_NAME = process.env.TRANSCRIPT_INSTITUTION || 'Osun State College of Nursing Sciences'
@@ -83,21 +87,103 @@ interface IssuedRequest {
   issuedSnapshot: string | null
 }
 
-/** Streams the official (non-watermarked) PDF from the snapshot taken when the transcript was issued */
-export async function sendOfficialPdf(res: Response, r: IssuedRequest): Promise<void> {
+async function prepareOfficial(r: IssuedRequest): Promise<{ data: TranscriptData; opts: PdfOptions; verifyUrl: string }> {
   if (!r.issuedSnapshot || !r.transcriptNo || !r.verifyCode || !r.issuedAt) throw new Error('Transcript not issued')
   const data = JSON.parse(r.issuedSnapshot) as TranscriptData
   if (data.student.dateOfBirth) data.student.dateOfBirth = new Date(data.student.dateOfBirth as unknown as string)
 
-  const base = (process.env.FRONTEND_URL || '').replace(/\/+$/, '')
-  const verifyUrl = `${base}/verify/${r.verifyCode}`
+  const verifyUrl = `${baseUrl()}/verify/${r.verifyCode}`
   const qrPng = await QRCode.toBuffer(verifyUrl, { width: 240, margin: 1 })
   const addressee = r.delivery === 'INSTITUTION'
     ? [r.institutionName || '', r.institutionLocation || ''].filter(Boolean)
     : ['To Whom It May Concern']
+  return {
+    data, verifyUrl,
+    opts: { addressee, official: { transcriptNo: r.transcriptNo, verifyUrl, qrPng, issuedAt: r.issuedAt } },
+  }
+}
 
-  streamTranscriptPdf(res, data, {
-    addressee,
-    official: { transcriptNo: r.transcriptNo, verifyUrl, qrPng, issuedAt: r.issuedAt },
-  })
+/** Streams the official (non-watermarked) PDF from the snapshot taken when the transcript was issued */
+export async function sendOfficialPdf(res: Response, r: IssuedRequest): Promise<void> {
+  const { data, opts } = await prepareOfficial(r)
+  streamTranscriptPdf(res, data, opts)
+}
+
+// ── Email delivery ────────────────────────────────────────────
+
+export interface DeliveryResult {
+  ok: boolean
+  to?: string
+  error?: string
+}
+
+/**
+ * Emails the official PDF: to the applicant, or to the receiving institution (the applicant then
+ * gets a short notice). The outcome is recorded on the request. Never throws.
+ */
+export async function deliverByEmail(requestId: string, overrideTo?: string): Promise<DeliveryResult> {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: requestId } })
+    if (!r || !r.transcriptNo || !r.issuedSnapshot) return { ok: false, error: 'This transcript has not been issued yet.' }
+
+    const to = overrideTo || (r.delivery === 'INSTITUTION' ? r.institutionEmail : r.email)
+    if (!to) return { ok: false, error: 'There is no email address to send to.' }
+
+    const { data, opts, verifyUrl } = await prepareOfficial(r)
+    const pdf = await transcriptPdfBuffer(data, opts)
+    const mail = r.delivery === 'INSTITUTION'
+      ? institutionTranscriptEmail(r, verifyUrl)
+      : applicantTranscriptEmail({ applicantName: r.applicantName, transcriptNo: r.transcriptNo }, verifyUrl)
+
+    const sent = await sendMail({
+      to, ...mail,
+      attachments: [{ filename: `Transcript-${r.transcriptNo.replace(/[^A-Za-z0-9]+/g, '-')}.pdf`, content: pdf }],
+    })
+
+    if (sent.ok) {
+      await prisma.transcriptRequest.update({
+        where: { id: requestId },
+        data: { emailStatus: 'SENT', emailTo: to, emailSentAt: new Date(), emailError: null, status: 'SENT', sentAt: new Date() },
+      })
+      if (r.delivery === 'INSTITUTION' && r.email) {
+        const notice = sentNoticeEmail({
+          applicantName: r.applicantName, transcriptNo: r.transcriptNo,
+          institutionName: r.institutionName, institutionEmail: r.institutionEmail,
+        })
+        const n = await sendMail({ to: r.email, ...notice })
+        if (!n.ok) console.error('Sent-notice email failed:', n.error)
+      }
+      return { ok: true, to }
+    }
+
+    await prisma.transcriptRequest.update({
+      where: { id: requestId },
+      data: { emailStatus: 'FAILED', emailTo: to, emailError: (sent.error || 'Unknown error').slice(0, 300) },
+    })
+    return { ok: false, to, error: sent.error }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Could not send the email.' }
+  }
+}
+
+/** "Request received" confirmation. Failures are logged and ignored. */
+export async function notifyReceived(r: {
+  applicantName: string; email: string; trackingCode: string; delivery: string; institutionName: string | null; feeAmount: number
+}): Promise<void> {
+  try {
+    const res = await sendMail({ to: r.email, ...receivedEmail(r) })
+    if (!res.ok) console.error('Confirmation email not sent:', res.error)
+  } catch (e) { console.error('Confirmation email error:', e) }
+}
+
+/** Tells the applicant why a request was rejected. Failures are logged and ignored. */
+export async function notifyRejected(requestId: string, reason: string): Promise<void> {
+  try {
+    const r = await prisma.transcriptRequest.findUnique({
+      where: { id: requestId }, select: { applicantName: true, email: true, trackingCode: true },
+    })
+    if (!r) return
+    const res = await sendMail({ to: r.email, ...rejectedEmail(r, reason) })
+    if (!res.ok) console.error('Rejection email not sent:', res.error)
+  } catch (e) { console.error('Rejection email error:', e) }
 }

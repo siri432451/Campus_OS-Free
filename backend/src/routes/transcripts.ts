@@ -7,7 +7,7 @@ import { BASIC_NURSING, BASIC_NURSING_CURRICULUM } from '../data/basicNursingCur
 import { loadTranscript, normCode } from '../services/transcriptData'
 import { streamTranscriptPdf } from '../services/transcriptPdf'
 import {
-  STATUS_LABELS, nextTranscriptNo, randomCode, sendOfficialPdf, snapshotOf,
+  STATUS_LABELS, EMAIL_RE, nextTranscriptNo, randomCode, sendOfficialPdf, snapshotOf, deliverByEmail, notifyRejected,
 } from '../services/transcriptRequests'
 
 const router = Router()
@@ -327,6 +327,7 @@ const REQUEST_FIELDS = {
   delivery: true, institutionName: true, institutionLocation: true, institutionEmail: true,
   note: true, feeAmount: true, receiptMime: true, studentId: true, rejectionReason: true,
   registrarNote: true, transcriptNo: true, verifyCode: true, issuedAt: true, sentAt: true,
+  emailStatus: true, emailTo: true, emailSentAt: true, emailError: true,
   createdAt: true, updatedAt: true,
 } as const
 
@@ -453,6 +454,7 @@ router.post('/requests/:id/reject', async (req: AuthRequest, res: Response): Pro
     if (!r) { res.status(404).json({ error: 'Request not found' }); return }
     if (r.transcriptNo) { res.status(409).json({ error: 'This transcript has already been issued.' }); return }
     await prisma.transcriptRequest.update({ where: { id: req.params.id }, data: { status: 'REJECTED', rejectionReason: reason } })
+    void notifyRejected(req.params.id, reason)
     res.json({ ok: true })
   } catch {
     res.status(500).json({ error: 'Failed to reject the request' })
@@ -490,9 +492,27 @@ router.post('/requests/:id/approve', async (req: AuthRequest, res: Response): Pr
         issuedSnapshot: snapshotOf(t), rejectionReason: null,
       },
     })
-    res.json({ ok: true, transcriptNo })
+    // Email the official PDF straight away. If this fails the transcript is still issued
+    // and the Registrar can retry from the request page.
+    const mail = await deliverByEmail(req.params.id)
+    res.json({ ok: true, transcriptNo, emailed: mail.ok, emailTo: mail.to, emailError: mail.error })
   } catch {
     res.status(500).json({ error: 'Failed to issue the transcript' })
+  }
+})
+
+// ── POST /requests/:id/send-email — send (or resend) the official PDF by email ─
+router.post('/requests/:id/send-email', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const to = cleanText(req.body?.to, 120)
+    if (to && !EMAIL_RE.test(to)) { res.status(400).json({ error: 'That email address does not look right.' }); return }
+    const r = await prisma.transcriptRequest.findUnique({ where: { id: req.params.id }, select: { transcriptNo: true } })
+    if (!r) { res.status(404).json({ error: 'Request not found' }); return }
+    if (!r.transcriptNo) { res.status(400).json({ error: 'Approve and issue the transcript first.' }); return }
+    const mail = await deliverByEmail(req.params.id, to || undefined)
+    res.json({ ok: mail.ok, to: mail.to, error: mail.error })
+  } catch {
+    res.status(500).json({ error: 'Failed to send the email' })
   }
 })
 

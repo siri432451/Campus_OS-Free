@@ -340,25 +340,43 @@ export interface PdfOptions {
   official?: OfficialOptions
 }
 
-export function streamTranscriptPdf(res: Response, data: TranscriptData, opts: PdfOptions = {}): void {
-  const doc = new PDFDocument({
+function createDoc(data: TranscriptData): Doc {
+  return new PDFDocument({
     size: 'A4',
     margins: { top: 40, bottom: 20, left: 40, right: 40 },
     info: { Title: `Transcript - ${data.student.name}`, Author: INSTITUTION },
   })
-  const safeName = (data.student.matricNo || data.student.name).replace(/[^A-Za-z0-9]+/g, '-')
-  res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader('Content-Disposition', `inline; filename="transcript-${safeName}.pdf"`)
-  doc.pipe(res)
+}
 
+function drawTranscript(doc: Doc, data: TranscriptData, opts: PdfOptions): void {
   if (opts.preview && !opts.official) {
     watermark(doc, 'PREVIEW')
     doc.on('pageAdded', () => watermark(doc, 'PREVIEW'))
   }
-
   const issuedAt = opts.official?.issuedAt ?? new Date()
   titlePage(doc, data, opts.addressee || [], issuedAt, opts.official?.transcriptNo)
   semesterPages(doc, data)
   notesPage(doc, data, opts.official)
   doc.end()
+}
+
+export function streamTranscriptPdf(res: Response, data: TranscriptData, opts: PdfOptions = {}): void {
+  const doc = createDoc(data)
+  const safeName = (data.student.matricNo || data.student.name).replace(/[^A-Za-z0-9]+/g, '-')
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `inline; filename="transcript-${safeName}.pdf"`)
+  doc.pipe(res)
+  drawTranscript(doc, data, opts)
+}
+
+/** Same transcript as a Buffer (used for email attachments) */
+export function transcriptPdfBuffer(data: TranscriptData, opts: PdfOptions = {}): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const doc = createDoc(data)
+    const chunks: Buffer[] = []
+    doc.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+    doc.on('end', () => resolve(Buffer.concat(chunks)))
+    doc.on('error', reject)
+    drawTranscript(doc, data, opts)
+  })
 }
