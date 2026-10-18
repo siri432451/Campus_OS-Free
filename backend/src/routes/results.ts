@@ -2,6 +2,7 @@ import { Router, Response } from 'express'
 import { Grade } from '@prisma/client'
 import prisma from '../utils/prisma'
 import { authenticate, isLecturer, AuthRequest } from '../middleware/auth'
+import { BASIC_NURSING_CURRICULUM } from '../data/basicNursingCurriculum'
 
 const router = Router()
 router.use(authenticate)
@@ -31,18 +32,56 @@ export const COURSES = [
   'Research Methods',
 ]
 
+// Same bands as the printed transcript: A 80+ (Distinction), B 70-79 (Credit),
+// C 50-69 (Pass), F 49 and below (Fail).
 function calcGrade(score: number): { grade: Grade; point: number } {
-  if (score >= 70) return { grade: Grade.A, point: 5.0 }
-  if (score >= 60) return { grade: Grade.B, point: 4.0 }
+  if (score >= 80) return { grade: Grade.A, point: 5.0 }
+  if (score >= 70) return { grade: Grade.B, point: 4.0 }
   if (score >= 50) return { grade: Grade.C, point: 3.0 }
-  if (score >= 45) return { grade: Grade.D, point: 2.0 }
-  if (score >= 40) return { grade: Grade.E, point: 1.0 }
   return { grade: Grade.F, point: 0.0 }
 }
+
+// Student level -> year of the 3-year Basic Nursing programme
+const LEVEL_YEARS = [
+  { level: 'ND1', year: 1, label: 'Year 1' },
+  { level: 'ND2', year: 2, label: 'Year 2' },
+  { level: 'ND3', year: 3, label: 'Year 3' },
+]
+
+const normCode = (c: string): string => (c || '').replace(/\s+/g, '').toUpperCase()
+const semesterNo = (s: string): number => (/second/i.test(s || '') ? 2 : /first/i.test(s || '') ? 1 : 0)
+
+/** Finds the curriculum course for a code (and semester). Title, code and credit units come from here. */
+function resolveCourse(code: string, name: string | undefined, semester: string) {
+  const sem = semesterNo(semester)
+  const matches = BASIC_NURSING_CURRICULUM.filter(
+    c => normCode(c.code) === normCode(code) && (!sem || c.semester === sem)
+  )
+  if (!matches.length) return null
+  return matches.find(c => name && c.title.toLowerCase() === name.toLowerCase()) ?? matches[0]
+}
+
+const validScore = (n: unknown): boolean => n !== '' && n !== null && !isNaN(Number(n)) && Number(n) >= 0 && Number(n) <= 100
 
 // ── GET /api/results/courses ───────────────────────────────────
 router.get('/courses', (_req, res: Response): void => {
   res.json({ courses: COURSES })
+})
+
+// ── GET /api/results/curriculum ────────────────────────────────
+// Courses for each year and semester, taken from the transcript curriculum
+router.get('/curriculum', (_req, res: Response): void => {
+  const levels = LEVEL_YEARS.map(l => ({
+    ...l,
+    semesters: [1, 2].map(sem => ({
+      semester: sem,
+      label: sem === 1 ? 'First Semester' : 'Second Semester',
+      courses: BASIC_NURSING_CURRICULUM
+        .filter(c => c.year === l.year && c.semester === sem)
+        .map(c => ({ code: c.code, title: c.title, lecture: c.lecture, practical: c.practical, credit: c.credit })),
+    })),
+  }))
+  res.json({ levels })
 })
 
 // ── GET /api/results/my ────────────────────────────────────────
@@ -69,15 +108,20 @@ router.get('/my', async (req: AuthRequest, res: Response): Promise<void> => {
 // ── POST /api/results ──────────────────────────────────────────
 router.post('/', isLecturer, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { studentId, courseCode, courseName, semester, academicYear, score, creditUnit } = req.body
+    const { studentId, courseCode, courseName, semester, academicYear, score } = req.body
     if (!studentId || !courseCode || score === undefined) {
       res.status(400).json({ error: 'Missing required fields' }); return
     }
+    if (!validScore(score)) { res.status(400).json({ error: 'Score must be between 0 and 100' }); return }
+    const course = resolveCourse(courseCode, courseName, semester)
+    if (!course) {
+      res.status(400).json({ error: `"${courseCode}" is not a course in the ${semester} curriculum` }); return
+    }
     const { grade, point } = calcGrade(Number(score))
     const result = await prisma.result.upsert({
-      where: { studentId_courseCode_semester_academicYear: { studentId, courseCode, semester, academicYear } },
-      update: { score, grade, gradePoint: point, creditUnit, lecturerId: req.user!.id, isPublished: false, approvedAt: null, approvedById: null, rejectedAt: null, rejectedById: null, rejectionReason: null },
-      create: { studentId, courseCode, courseName, semester, academicYear, score, grade, gradePoint: point, creditUnit: creditUnit || 2, lecturerId: req.user!.id },
+      where: { studentId_courseCode_semester_academicYear: { studentId, courseCode: course.code, semester, academicYear } },
+      update: { courseName: course.title, score, grade, gradePoint: point, creditUnit: course.credit, lecturerId: req.user!.id, isPublished: false, approvedAt: null, approvedById: null, rejectedAt: null, rejectedById: null, rejectionReason: null },
+      create: { studentId, courseCode: course.code, courseName: course.title, semester, academicYear, score, grade, gradePoint: point, creditUnit: course.credit, lecturerId: req.user!.id },
     })
     res.status(201).json(result)
   } catch { res.status(500).json({ error: 'Failed to save result' }) }
@@ -87,20 +131,30 @@ router.post('/', isLecturer, async (req: AuthRequest, res: Response): Promise<vo
 router.post('/bulk', isLecturer, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { results, semester, academicYear } = req.body as {
-      results: Array<{ studentId: string; courseCode: string; courseName: string; score: number; creditUnit?: number }>
+      results: Array<{ studentId: string; courseCode: string; courseName: string; score: number }>
       semester: string
       academicYear: string
     }
     if (!Array.isArray(results) || results.length === 0) {
       res.status(400).json({ error: 'results array required' }); return
     }
-    let created = 0
+    // Check every row first so nothing is half-saved
+    const rows = []
     for (const r of results) {
+      if (!validScore(r.score)) { res.status(400).json({ error: 'Every score must be between 0 and 100' }); return }
+      const course = resolveCourse(r.courseCode, r.courseName, semester)
+      if (!course) {
+        res.status(400).json({ error: `"${r.courseCode}" is not a course in the ${semester} curriculum` }); return
+      }
+      rows.push({ r, course })
+    }
+    let created = 0
+    for (const { r, course } of rows) {
       const { grade, point } = calcGrade(Number(r.score))
       await prisma.result.upsert({
-        where: { studentId_courseCode_semester_academicYear: { studentId: r.studentId, courseCode: r.courseCode, semester, academicYear } },
-        update: { score: r.score, grade, gradePoint: point, creditUnit: r.creditUnit || 2, lecturerId: req.user!.id, isPublished: false, approvedAt: null, approvedById: null, rejectedAt: null, rejectedById: null, rejectionReason: null },
-        create: { studentId: r.studentId, courseCode: r.courseCode, courseName: r.courseName, semester, academicYear, score: r.score, grade, gradePoint: point, creditUnit: r.creditUnit || 2, lecturerId: req.user!.id },
+        where: { studentId_courseCode_semester_academicYear: { studentId: r.studentId, courseCode: course.code, semester, academicYear } },
+        update: { courseName: course.title, score: r.score, grade, gradePoint: point, creditUnit: course.credit, lecturerId: req.user!.id, isPublished: false, approvedAt: null, approvedById: null, rejectedAt: null, rejectedById: null, rejectionReason: null },
+        create: { studentId: r.studentId, courseCode: course.code, courseName: course.title, semester, academicYear, score: r.score, grade, gradePoint: point, creditUnit: course.credit, lecturerId: req.user!.id },
       })
       created++
     }
@@ -202,7 +256,7 @@ router.get('/students', isLecturer, async (req: AuthRequest, res: Response): Pro
   try {
     const level = (req.query.level as string) || ''
     const where: Record<string, unknown> = { role: 'STUDENT' }
-    if (['ND1', 'ND2', 'HND1', 'HND2'].includes(level)) where.level = level
+    if (['ND1', 'ND2', 'ND3', 'HND1', 'HND2'].includes(level)) where.level = level
     const students = await prisma.user.findMany({
       where,
       select: { id: true, name: true, matricNo: true, department: true, level: true },
