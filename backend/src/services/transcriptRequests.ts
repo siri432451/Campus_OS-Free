@@ -132,7 +132,8 @@ export async function deliverByEmail(requestId: string, overrideTo?: string): Pr
     const { data, opts, verifyUrl } = await prepareOfficial(r)
     const pdf = await transcriptPdfBuffer(data, opts)
     const mail = r.delivery === 'INSTITUTION'
-      ? institutionTranscriptEmail(r, verifyUrl)
+      ? institutionTranscriptEmail(
+        { applicantName: r.applicantName, transcriptNo: r.transcriptNo, institutionName: r.institutionName }, verifyUrl)
       : applicantTranscriptEmail({ applicantName: r.applicantName, transcriptNo: r.transcriptNo }, verifyUrl)
 
     const sent = await sendMail({
