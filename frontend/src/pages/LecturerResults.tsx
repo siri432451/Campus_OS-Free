@@ -6,18 +6,14 @@ import { Navigate } from 'react-router-dom'
 const API = (import.meta.env.VITE_API_URL as string | undefined) || ''
 const LECTURER_ROLES = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'LECTURER']
 
-const COURSES = [
-  'Anatomy & Physiology', 'Pharmacology', 'Nutrition & Dietetics', 'Primary Health Care (PHC)',
-  'Medical-Surgical Nursing', 'Foundation of Nursing', 'Community Health Nursing',
-  'Reproductive Health', 'Maternal & Child Health', 'Midwifery Practice',
-  'Mental Health / Psychiatric Nursing', 'Paediatric Nursing', 'Geriatric Nursing',
-  'Microbiology', 'Nursing Ethics & Jurisprudence', 'Research & Statistics',
-  'Health Education', 'Sociology', 'Psychology',
-]
-
 const ACADEMIC_YEARS = ['2023/2024', '2024/2025', '2025/2026', '2026/2027']
 const SEMESTERS = ['First Semester', 'Second Semester']
-const LEVELS = ['ND1', 'ND2', 'HND1', 'HND2']
+const LEVELS = [
+  { value: 'ND1', label: 'Year 1' },
+  { value: 'ND2', label: 'Year 2' },
+  { value: 'ND3', label: 'Year 3' },
+]
+const levelLabel = (v: string | null): string => LEVELS.find(l => l.value === v)?.label ?? v ?? ''
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('campusos_token')
@@ -41,13 +37,38 @@ type ResultEntry = {
   creditUnit: string
 }
 
+type CurCourse = { code: string; title: string; lecture: number; practical: number; credit: number }
+type CurLevel = { level: string; year: number; label: string; semesters: { semester: number; label: string; courses: CurCourse[] }[] }
+
+// Courses for a level + semester, from the transcript curriculum
+function coursesFor(curriculum: CurLevel[], level: string, semester: string): CurCourse[] {
+  const lv = curriculum.find(l => l.level === level)
+  const n = semester === 'Second Semester' ? 2 : 1
+  return lv?.semesters.find(s => s.semester === n)?.courses ?? []
+}
+
+const courseKey = (c: { code: string; title: string }): string => `${c.code}::${c.title}`
+
+function CourseSelect({ courses, code, name, emptyText, onPick }: {
+  courses: CurCourse[]; code: string; name: string; emptyText: string; onPick: (c: CurCourse) => void
+}) {
+  const value = courses.some(c => c.code === code && c.title === name) ? courseKey({ code, title: name }) : ''
+  return (
+    <select value={value}
+      onChange={e => { const c = courses.find(x => courseKey(x) === e.target.value); if (c) onPick(c) }}
+      className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={{ borderColor: '#E5E7EB' }}>
+      <option value="">{courses.length ? 'Select course…' : emptyText}</option>
+      {courses.map((c, i) => <option key={`${courseKey(c)}-${i}`} value={courseKey(c)}>{c.code} — {c.title} ({c.credit} units)</option>)}
+    </select>
+  )
+}
+
+// Same bands as the printed transcript: A 80+, B 70-79, C 50-69, F below 50
 function calcGrade(score: number): string {
   if (isNaN(score)) return '—'
-  if (score >= 70) return 'A'
-  if (score >= 60) return 'B'
+  if (score >= 80) return 'A'
+  if (score >= 70) return 'B'
   if (score >= 50) return 'C'
-  if (score >= 45) return 'D'
-  if (score >= 40) return 'E'
   return 'F'
 }
 
@@ -71,7 +92,7 @@ export default function LecturerResults() {
 
   // ── Single entry form ──
   const [form, setForm] = useState({
-    studentId: '', courseName: COURSES[0], courseCode: '', semester: 'First Semester',
+    studentId: '', level: '', courseName: '', courseCode: '', semester: 'First Semester',
     academicYear: '2025/2026', score: '', creditUnit: '2',
   })
   const [submitting, setSubmitting] = useState(false)
@@ -81,7 +102,8 @@ export default function LecturerResults() {
   const [bulkText, setBulkText] = useState('')
   const [bulkSemester, setBulkSemester] = useState('First Semester')
   const [bulkYear, setBulkYear] = useState('2025/2026')
-  const [bulkCourseName, setBulkCourseName] = useState(COURSES[0])
+  const [bulkCourseName, setBulkCourseName] = useState('')
+  const [bulkLevel, setBulkLevel] = useState('')
   const [bulkCourseCode, setBulkCourseCode] = useState('')
   const [bulkCreditUnit, setBulkCreditUnit] = useState('2')
   const [bulkParsed, setBulkParsed] = useState<ResultEntry[]>([])
@@ -89,7 +111,7 @@ export default function LecturerResults() {
 
   // ── Class Sheet (NEW) ──
   const [sheetLevel, setSheetLevel] = useState('')
-  const [sheetCourse, setSheetCourse] = useState(COURSES[0])
+  const [sheetCourse, setSheetCourse] = useState('')
   const [sheetCourseCode, setSheetCourseCode] = useState('')
   const [sheetCredit, setSheetCredit] = useState('2')
   const [sheetSemester, setSheetSemester] = useState('First Semester')
@@ -111,6 +133,14 @@ export default function LecturerResults() {
     load()
   }, [])
 
+  const [curriculum, setCurriculum] = useState<CurLevel[]>([])
+  useEffect(() => {
+    fetch(`${API}/api/results/curriculum`, { headers: { ...authHeaders() } })
+      .then(r => r.json())
+      .then(d => setCurriculum(d.levels || []))
+      .catch(() => showToast('Could not load the course list', 'error'))
+  }, [])
+
   // Students in the chosen level for the class sheet
   const sheetStudents = useMemo(() => {
     let list = sheetLevel ? students.filter(s => s.level === sheetLevel) : []
@@ -129,14 +159,14 @@ export default function LecturerResults() {
   }
 
   async function submitSheet() {
-    if (!sheetLevel || !sheetCourse || sheetEntered === 0) return
+    if (!sheetLevel || !sheetCourse || !sheetCourseCode || sheetEntered === 0) return
     const levelStudents = students.filter(s => s.level === sheetLevel)
     const results = levelStudents
       .filter(s => sheetScores[s.id] !== undefined && sheetScores[s.id] !== '')
       .map(s => ({
         studentId: s.id,
         courseName: sheetCourse,
-        courseCode: sheetCourseCode || sheetCourse.substring(0, 6).toUpperCase(),
+        courseCode: sheetCourseCode,
         score: Number(sheetScores[s.id]),
         creditUnit: Number(sheetCredit) || 2,
       }))
@@ -157,7 +187,7 @@ export default function LecturerResults() {
   }
 
   async function submitSingle() {
-    if (!form.studentId || !form.courseName || !form.score) return
+    if (!form.studentId || !form.courseName || !form.courseCode || !form.score) return
     const scoreNum = Number(form.score)
     if (isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) {
       showToast('Score must be 0-100', 'error'); return
@@ -171,7 +201,7 @@ export default function LecturerResults() {
         body: JSON.stringify({
           studentId: form.studentId,
           courseName: form.courseName,
-          courseCode: form.courseCode || form.courseName.substring(0, 6).toUpperCase(),
+          courseCode: form.courseCode,
           semester: form.semester,
           academicYear: form.academicYear,
           score: scoreNum,
@@ -202,7 +232,7 @@ export default function LecturerResults() {
       parsed.push({
         studentId: student.id,
         studentName: student.name,
-        courseCode: bulkCourseCode || bulkCourseName.substring(0, 6).toUpperCase(),
+        courseCode: bulkCourseCode,
         courseName: bulkCourseName,
         score,
         creditUnit: bulkCreditUnit,
@@ -213,6 +243,7 @@ export default function LecturerResults() {
 
   async function submitBulk() {
     if (bulkParsed.length === 0) return
+    if (!bulkCourseCode) { showToast('Choose a course first', 'error'); return }
     setBulkSubmitting(true)
     try {
       const res = await fetch(`${API}/api/results/bulk`, {
@@ -223,8 +254,8 @@ export default function LecturerResults() {
           academicYear: bulkYear,
           results: bulkParsed.map(r => ({
             studentId: r.studentId,
-            courseName: r.courseName,
-            courseCode: r.courseCode,
+            courseName: bulkCourseName,
+            courseCode: bulkCourseCode,
             score: Number(r.score),
             creditUnit: Number(r.creditUnit),
           })),
@@ -269,35 +300,16 @@ export default function LecturerResults() {
           <div className="bg-white rounded-2xl p-6" style={{ boxShadow: '0 4px 24px rgba(27,67,50,0.06)' }}>
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
               <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Level</div>
-                <select value={sheetLevel} onChange={e => { setSheetLevel(e.target.value); setSheetScores({}) }}
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Year</div>
+                <select value={sheetLevel} onChange={e => { setSheetLevel(e.target.value); setSheetScores({}); setSheetCourse(''); setSheetCourseCode('') }}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  <option value="">Select level…</option>
-                  {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </label>
-              <label className="block col-span-2 lg:col-span-2">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course</div>
-                <select value={sheetCourse} onChange={e => setSheetCourse(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {COURSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </label>
-              <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course Code</div>
-                <input type="text" value={sheetCourseCode} onChange={e => setSheetCourseCode(e.target.value)}
-                  placeholder="e.g. NSG201" className="w-full px-3 py-2 rounded-lg border text-sm font-mono" style={inputStyle} />
-              </label>
-              <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Units</div>
-                <select value={sheetCredit} onChange={e => setSheetCredit(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}</option>)}
+                  <option value="">Select year…</option>
+                  {LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                 </select>
               </label>
               <label className="block">
                 <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Semester</div>
-                <select value={sheetSemester} onChange={e => setSheetSemester(e.target.value)}
+                <select value={sheetSemester} onChange={e => { setSheetSemester(e.target.value); setSheetCourse(''); setSheetCourseCode('') }}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
                   {SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
@@ -309,6 +321,18 @@ export default function LecturerResults() {
                   {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </label>
+              <label className="block col-span-2 lg:col-span-2">
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course</div>
+                <CourseSelect courses={coursesFor(curriculum, sheetLevel, sheetSemester)} code={sheetCourseCode} name={sheetCourse}
+                  emptyText="Select a year first…"
+                  onPick={c => { setSheetCourse(c.title); setSheetCourseCode(c.code); setSheetCredit(String(c.credit)) }} />
+              </label>
+              <div className="block">
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Code · Units</div>
+                <div className="w-full px-3 py-2 rounded-lg border text-sm font-mono bg-gray-50" style={inputStyle}>
+                  {sheetCourseCode ? `${sheetCourseCode} · ${sheetCredit}` : '—'}
+                </div>
+              </div>
             </div>
 
             {loadingStudents && <p className="text-sm text-center py-6" style={{ color: '#8A9BB0' }}>Loading students…</p>}
@@ -336,7 +360,7 @@ export default function LecturerResults() {
                 </div>
 
                 {sheetStudents.length === 0 ? (
-                  <p className="text-center text-sm py-8" style={{ color: '#8A9BB0' }}>No students in {sheetLevel}</p>
+                  <p className="text-center text-sm py-8" style={{ color: '#8A9BB0' }}>No students in {levelLabel(sheetLevel)}</p>
                 ) : (
                   <div className="rounded-xl overflow-hidden border" style={{ borderColor: '#EEF1F5' }}>
                     {sheetStudents.map((s, idx) => {
@@ -361,7 +385,7 @@ export default function LecturerResults() {
                   </div>
                 )}
 
-                <button onClick={submitSheet} disabled={sheetSubmitting || sheetEntered === 0}
+                <button onClick={submitSheet} disabled={sheetSubmitting || sheetEntered === 0 || !sheetCourseCode}
                   className="w-full mt-4 py-3 rounded-xl text-sm font-bold text-white border-0 cursor-pointer disabled:opacity-50"
                   style={{ background: '#122400' }}>
                   {sheetSubmitting ? 'Submitting…' : `Submit ${sheetEntered} Result${sheetEntered === 1 ? '' : 's'} for Approval`}
@@ -383,45 +407,45 @@ export default function LecturerResults() {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <label className="block col-span-2">
                 <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Student</div>
-                <select value={form.studentId} onChange={e => setForm({ ...form, studentId: e.target.value })}
+                <select value={form.studentId} onChange={e => {
+                    const st = students.find(x => x.id === e.target.value)
+                    const lvl = st?.level || form.level
+                    setForm({ ...form, studentId: e.target.value, level: lvl, ...(lvl !== form.level ? { courseName: '', courseCode: '' } : {}) })
+                  }}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
                   <option value="">Select student...</option>
                   {students.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} — {s.matricNo} {s.level ? `(${s.level})` : ''}</option>
+                    <option key={s.id} value={s.id}>{s.name} — {s.matricNo} {s.level ? `(${levelLabel(s.level)})` : ''}</option>
                   ))}
                 </select>
               </label>
-              <label className="block col-span-2">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course</div>
-                <select value={form.courseName} onChange={e => setForm({ ...form, courseName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {COURSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </label>
               <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course Code</div>
-                <input type="text" value={form.courseCode} onChange={e => setForm({ ...form, courseCode: e.target.value })}
-                  placeholder="e.g. NSG201" className="w-full px-3 py-2 rounded-lg border text-sm font-mono" style={inputStyle} />
-              </label>
-              <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Credit Units</div>
-                <select value={form.creditUnit} onChange={e => setForm({ ...form, creditUnit: e.target.value })}
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Year</div>
+                <select value={form.level} onChange={e => setForm({ ...form, level: e.target.value, courseName: '', courseCode: '' })}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {[1,2,3,4,6].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </label>
-              <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Academic Year</div>
-                <select value={form.academicYear} onChange={e => setForm({ ...form, academicYear: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                  <option value="">Select year…</option>
+                  {LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                 </select>
               </label>
               <label className="block">
                 <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Semester</div>
-                <select value={form.semester} onChange={e => setForm({ ...form, semester: e.target.value })}
+                <select value={form.semester} onChange={e => setForm({ ...form, semester: e.target.value, courseName: '', courseCode: '' })}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
                   {SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <label className="block col-span-2">
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course</div>
+                <CourseSelect courses={coursesFor(curriculum, form.level, form.semester)} code={form.courseCode} name={form.courseName}
+                  emptyText="Select a year first…"
+                  onPick={c => setForm({ ...form, courseName: c.title, courseCode: c.code, creditUnit: String(c.credit) })} />
+                {form.courseCode && <div className="mt-1 text-xs font-mono" style={{ color: '#8A9BB0' }}>{form.courseCode} · {form.creditUnit} credit units</div>}
+              </label>
+              <label className="block col-span-2">
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Academic Year</div>
+                <select value={form.academicYear} onChange={e => setForm({ ...form, academicYear: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
+                  {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </label>
               <label className="block col-span-2">
@@ -433,7 +457,7 @@ export default function LecturerResults() {
                 )}
               </label>
             </div>
-            <button onClick={submitSingle} disabled={submitting || !form.studentId || !form.score}
+            <button onClick={submitSingle} disabled={submitting || !form.studentId || !form.courseCode || !form.score}
               className="w-full py-3 rounded-xl text-sm font-bold text-white border-0 cursor-pointer disabled:opacity-50"
               style={{ background: '#122400' }}>
               {submitting ? 'Submitting...' : 'Submit for Admin Approval'}
@@ -445,37 +469,33 @@ export default function LecturerResults() {
         {activeTab === 'bulk' && (
           <div className="bg-white rounded-2xl p-6" style={{ boxShadow: '0 4px 24px rgba(27,67,50,0.06)' }}>
             <div className="grid grid-cols-2 gap-3 mb-4">
-              <label className="block col-span-2">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course</div>
-                <select value={bulkCourseName} onChange={e => setBulkCourseName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {COURSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </label>
               <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course Code</div>
-                <input type="text" value={bulkCourseCode} onChange={e => setBulkCourseCode(e.target.value)}
-                  placeholder="e.g. NSG201" className="w-full px-3 py-2 rounded-lg border text-sm font-mono" style={inputStyle} />
-              </label>
-              <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Credit Units</div>
-                <select value={bulkCreditUnit} onChange={e => setBulkCreditUnit(e.target.value)}
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Year</div>
+                <select value={bulkLevel} onChange={e => { setBulkLevel(e.target.value); setBulkCourseName(''); setBulkCourseCode('') }}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {[1,2,3,4,6].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </label>
-              <label className="block">
-                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Academic Year</div>
-                <select value={bulkYear} onChange={e => setBulkYear(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
-                  {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                  <option value="">Select year…</option>
+                  {LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                 </select>
               </label>
               <label className="block">
                 <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Semester</div>
-                <select value={bulkSemester} onChange={e => setBulkSemester(e.target.value)}
+                <select value={bulkSemester} onChange={e => { setBulkSemester(e.target.value); setBulkCourseName(''); setBulkCourseCode('') }}
                   className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
                   {SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <label className="block col-span-2">
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Course</div>
+                <CourseSelect courses={coursesFor(curriculum, bulkLevel, bulkSemester)} code={bulkCourseCode} name={bulkCourseName}
+                  emptyText="Select a year first…"
+                  onPick={c => { setBulkCourseName(c.title); setBulkCourseCode(c.code); setBulkCreditUnit(String(c.credit)) }} />
+                {bulkCourseCode && <div className="mt-1 text-xs font-mono" style={{ color: '#8A9BB0' }}>{bulkCourseCode} · {bulkCreditUnit} credit units</div>}
+              </label>
+              <label className="block col-span-2">
+                <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={labelStyle}>Academic Year</div>
+                <select value={bulkYear} onChange={e => setBulkYear(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border text-sm bg-white" style={inputStyle}>
+                  {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </label>
             </div>
