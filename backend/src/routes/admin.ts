@@ -1,11 +1,20 @@
 import { Router, Response } from 'express'
 import bcrypt from 'bcryptjs'
+import { randomInt } from 'crypto'
 import { authenticate, AuthRequest } from '../middleware/auth'
 import prisma from '../utils/prisma'
 import { sendVerificationCode, sendWelcomeEmail } from '../services/onboarding'
 
 const router = Router()
 router.use(authenticate)
+
+// Random temporary password (no look-alike characters), e.g. "Kt7mQp3xZw9R"
+function generateTempPassword(length = 12): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+  let out = ''
+  for (let i = 0; i < length; i++) out += chars[randomInt(chars.length)]
+  return out
+}
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'SCHOOL_ADMIN']
 const SUPER_ROLES = ['SUPER_ADMIN']
@@ -364,7 +373,7 @@ router.post('/lecturers', async (req: AuthRequest, res: Response): Promise<void>
       return
     }
 
-    const DEFAULT_PASSWORD = 'Lecturer123!'
+    const DEFAULT_PASSWORD = generateTempPassword()
     const hashed = await bcrypt.hash(DEFAULT_PASSWORD, 10)
     const newUser = await prisma.user.create({
       data: {
@@ -426,7 +435,7 @@ router.patch('/lecturers/:id/reset-password', async (req: AuthRequest, res: Resp
   try {
     const lecturer = await prisma.user.findUnique({ where: { id: req.params.id } })
     if (!lecturer || lecturer.role !== 'LECTURER') { res.status(404).json({ error: 'Lecturer not found' }); return }
-    const DEFAULT_PASSWORD = 'Lecturer123!'
+    const DEFAULT_PASSWORD = generateTempPassword()
     const hashed = await bcrypt.hash(DEFAULT_PASSWORD, 10)
     await prisma.user.update({ where: { id: req.params.id }, data: { password: hashed } })
     res.json({ ok: true, defaultPassword: DEFAULT_PASSWORD })
