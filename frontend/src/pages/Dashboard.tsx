@@ -44,7 +44,7 @@ function roleBadge(role: string) {
   if (role === 'LECTURER') return '👨‍🏫 Lecturer'
   if (role === 'PRINT_OPERATOR') return '🖨️ Print Operator'
   if (role === 'SUPER_ADMIN') return '⚙️ Super Admin'
-  if (role === 'SCHOOL_ADMIN') return '⚙️ School Admin'
+  if (role === 'SCHOOL_ADMIN') return '⚙️ Provost'
   return 'User'
 }
 

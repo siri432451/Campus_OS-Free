@@ -149,7 +149,7 @@ export default function AdminLecturers() {
         <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: '#122400' }}>
-              {user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'School Admin'}
+              {user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Provost'}
             </p>
             <h1 className="text-3xl font-black" style={{ color: '#1B4332' }}>Lecturers</h1>
             <div className="mt-2 h-1 w-16 rounded-full" style={{ background: '#D4A24C' }} />
@@ -370,7 +370,7 @@ export default function AdminLecturers() {
                   <h3 className="font-black text-lg" style={{ color: '#1B4332' }}>New Lecturer</h3>
                   <button onClick={() => setShowCreate(false)} disabled={creating} className="text-2xl leading-none border-0 bg-transparent cursor-pointer" style={{ color: '#1B4332', opacity: 0.5 }}>x</button>
                 </div>
-                <p className="text-xs mb-4" style={{ color: '#1B4332', opacity: 0.65 }}>Default password is <strong>Lecturer123!</strong></p>
+                <p className="text-xs mb-4" style={{ color: '#1B4332', opacity: 0.65 }}>A temporary password is generated for each lecturer and shown once after creation.</p>
                 <label className="block mb-3">
                   <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#1B4332', opacity: 0.7 }}>Full name</div>
                   <input type="text" value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} disabled={creating}

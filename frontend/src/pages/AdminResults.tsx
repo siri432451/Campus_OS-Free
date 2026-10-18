@@ -141,7 +141,7 @@ export default function AdminResults() {
         <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: '#122400' }}>
-              {user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'School Admin'}
+              {user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Provost'}
             </p>
             <h1 className="text-3xl font-black" style={{ color: '#1B4332' }}>Results</h1>
             <div className="mt-2 h-1 w-16 rounded-full" style={{ background: '#D4A24C' }} />

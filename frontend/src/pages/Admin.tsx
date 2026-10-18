@@ -146,7 +146,7 @@ export default function Admin() {
         <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: '#122400' }}>
-              {isSuper ? 'Super Admin' : 'School Admin'}
+              {isSuper ? 'Super Admin' : 'Provost'}
             </p>
             <h1 className="text-3xl font-black" style={{ color: '#1B4332' }}>
               Admin Dashboard

@@ -39,7 +39,7 @@ function canManage(user: { role: string; id: string } | null, ann: Announcement)
 }
 
 function canPost(role?: string): boolean {
-  return ['LECTURER', 'SCHOOL_ADMIN', 'SUPER_ADMIN'].includes(role ?? '')
+  return ['LECTURER', 'REGISTRAR', 'SCHOOL_ADMIN', 'SUPER_ADMIN'].includes(role ?? '')
 }
 
 // ── Announcement card ─────────────────────────────────────────

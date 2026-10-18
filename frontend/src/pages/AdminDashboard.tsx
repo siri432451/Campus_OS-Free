@@ -103,7 +103,7 @@ export default function AdminDashboard() {
                 {greeting()}, {user?.name ?? 'Admin'}
               </h1>
               <p className="text-sm" style={{ color: '#CFE0D2' }}>
-                {(user as unknown as { staffId?: string })?.staffId ?? ''} · {isSuper ? 'Super Admin' : 'School Admin'} · Osun State College of Nursing Sciences
+                {(user as unknown as { staffId?: string })?.staffId ?? ''} · {isSuper ? 'Super Admin' : 'Provost'} · Osun State College of Nursing Sciences
               </p>
             </div>
             <div className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold" style={{ background: '#C99A44', color: '#3d2b0f' }}>
