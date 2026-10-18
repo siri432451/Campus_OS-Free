@@ -40,7 +40,11 @@ async function main() {
     const schoolPw = await bcrypt.hash(process.env.SCHOOL_ADMIN_PASSWORD, 12)
     const schoolAdmin = await prisma.user.upsert({
       where: { staffId: 'ADMIN002' },
-      update: resetAdmin ? { password: schoolPw, isActive: true, role: Role.SCHOOL_ADMIN } : {},
+      update: {
+        // SCHOOL_ADMIN_NAME on the host always keeps the display name in sync
+        ...(process.env.SCHOOL_ADMIN_NAME ? { name: process.env.SCHOOL_ADMIN_NAME } : {}),
+        ...(resetAdmin ? { password: schoolPw, isActive: true, role: Role.SCHOOL_ADMIN } : {}),
+      },
       create: {
         name: process.env.SCHOOL_ADMIN_NAME || 'School Admin',
         email: process.env.SCHOOL_ADMIN_EMAIL || undefined,
